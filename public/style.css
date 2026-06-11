@@ -1,0 +1,33 @@
+:root {
+  --bg: #101013; --card: #1b1d22; --card-2: #15171b; --line: #26292f;
+  --text: #e4e6ea; --sub: #8b95a1; --red: #f04452; --blue: #3182f6; --green: #00d082;
+  --radius: 16px;
+}
+* { box-sizing: border-box; margin: 0; }
+body { background: var(--bg); color: var(--text); font-family: Pretendard, -apple-system, 'Apple SD Gothic Neo', sans-serif; }
+.wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+.card { background: var(--card); border-radius: var(--radius); padding: 18px; margin-bottom: 10px; }
+.sub { color: var(--sub); font-size: 12px; }
+.badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; background: #2a3038; color: var(--sub); }
+.badge.live { background: rgba(240,68,82,.15); color: var(--red); }
+.badge.ok { background: rgba(0,208,130,.12); color: var(--green); }
+button.primary { background: var(--blue); color: #fff; border: 0; border-radius: 12px; padding: 12px 20px; font-size: 14px; font-weight: 700; cursor: pointer; width: 100%; }
+button.primary:disabled { opacity: .4; cursor: default; }
+button.primary:hover:not(:disabled) { filter: brightness(1.1); }
+input, textarea, select { background: var(--card-2); border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 11px 12px; font-size: 14px; width: 100%; margin-top: 6px; }
+input:focus, textarea:focus { outline: none; border-color: var(--blue); }
+label { display: block; margin-top: 14px; font-size: 13px; color: var(--sub); }
+.steps { display: flex; gap: 6px; margin-bottom: 18px; }
+.steps .dot { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
+.steps .dot.on { background: var(--blue); }
+.log { background: var(--card-2); border-radius: 10px; padding: 12px; font-family: ui-monospace, monospace; font-size: 12px; max-height: 240px; overflow-y: auto; white-space: pre-wrap; color: var(--sub); }
+.up { color: var(--red); } .down { color: var(--blue); }
+h1 { font-size: 17px; font-weight: 800; }
+h2 { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+td, th { padding: 9px 4px; border-bottom: 1px solid var(--line); text-align: left; }
+th { color: var(--sub); font-weight: 500; font-size: 11px; }
+td.num, th.num { text-align: right; }
+.row { display: flex; justify-content: space-between; align-items: center; }
+.grid3 { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; }
+@media (max-width: 640px) { .grid3 { grid-template-columns: 1fr; } }
