@@ -14,7 +14,7 @@ function render(s) {
   if (s.warning) $('warn-text').textContent = s.warning;
 
   // 3카드
-  const totalPnlPct = (s.equity / s.initialCash - 1) * 100;
+  const totalPnlPct = (s.equity / (s.initialCash || 1) - 1) * 100;
   $('equity').textContent = won(s.equity);
   $('pnl').textContent = `${won(s.equity - s.initialCash).replace('-', '−')} (${pct(totalPnlPct)}) · 오늘 ${pct(s.dailyPnlPct)}`;
   $('pnl').className = cls(totalPnlPct);
@@ -35,8 +35,8 @@ function render(s) {
   const tbody = $('positions');
   tbody.textContent = '';
   for (const p of s.positions) {
-    const cur = s.quotes?.[p.symbol]?.price ?? p.avgPrice;
-    const pnlP = (cur / p.avgPrice - 1) * 100;
+    const cur = p.currentPrice ?? s.quotes?.[p.symbol]?.price ?? p.avgPrice;
+    const pnlP = p.avgPrice ? (cur / p.avgPrice - 1) * 100 : 0;
     const tr = document.createElement('tr');
     for (const [text, klass] of [
       [p.name, ''], [p.quantity + '주', 'num'], [won(p.avgPrice), 'num'],
