@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { loadConfig } from '../src/core/config.js';
+import { loadConfig, isConfigured } from '../src/core/config.js';
 import { writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,9 +15,17 @@ describe('loadConfig', () => {
   });
 
   it('파일 값이 기본값을 덮어쓴다 (부분 병합)', () => {
-    const cfg = loadConfig('config.json'); // Task 1에서 만든 파일
-    expect(cfg.cycleMinutes).toBe(30);
-    expect(cfg.claudeCmd).toBe('claude'); // 파일에 없는 키는 기본값
+    const tmpPath = join(tmpdir(), `merge-config-${process.pid}.json`);
+    writeFileSync(tmpPath, JSON.stringify({ cycleMinutes: 5, guardrails: { maxPositionPct: 15 } }));
+    try {
+      const cfg = loadConfig(tmpPath);
+      expect(cfg.cycleMinutes).toBe(5);
+      expect(cfg.guardrails.maxPositionPct).toBe(15);
+      expect(cfg.guardrails.maxOrdersPerDay).toBe(10); // deep-merge keeps unset guardrails
+      expect(cfg.claudeCmd).toBe('claude'); // unset top-level keeps default
+    } finally {
+      rmSync(tmpPath);
+    }
   });
 
   it('config.json이 깨진 JSON이면 파일 경로를 포함한 에러를 던진다', () => {
@@ -35,5 +43,31 @@ describe('loadConfig', () => {
     expect(c.guardrails.reentryCooldownMin).toBe(60);
     expect(c.guardrails.maxTotalExposurePct).toBe(80);
     expect(c.brokerId).toBe('');
+  });
+});
+
+describe('isConfigured', () => {
+  it('파일이 없으면 false를 반환한다', () => {
+    expect(isConfigured('/nonexistent/config.json')).toBe(false);
+  });
+
+  it('brokerId가 빈 문자열이면 false를 반환한다', () => {
+    const tmpPath = join(tmpdir(), `configured-empty-${process.pid}.json`);
+    writeFileSync(tmpPath, JSON.stringify({ brokerId: '' }));
+    try {
+      expect(isConfigured(tmpPath)).toBe(false);
+    } finally {
+      rmSync(tmpPath);
+    }
+  });
+
+  it('brokerId가 설정되어 있으면 true를 반환한다', () => {
+    const tmpPath = join(tmpdir(), `configured-demo-${process.pid}.json`);
+    writeFileSync(tmpPath, JSON.stringify({ brokerId: 'demo' }));
+    try {
+      expect(isConfigured(tmpPath)).toBe(true);
+    } finally {
+      rmSync(tmpPath);
+    }
   });
 });
