@@ -12,16 +12,18 @@ export class BrainAuthError extends Error {}
 const AUTH_PATTERNS = /please run.*login|claude login|invalid api key|not authenticated|usage limit|rate.?limit/i;
 
 function classifyError(err: unknown): Error {
-  const msg =
-    String((err as { stderr?: string; message?: string })?.stderr ?? '') +
-    String((err as Error)?.message ?? '');
-  if (AUTH_PATTERNS.test(msg)) return new BrainAuthError(`claude CLI 인증/한도 문제: ${msg.slice(0, 200)}`);
-  return err as Error;
+  // stderr는 claude CLI 프로세스의 출력일 때만 검사 — LLM 응답 텍스트(메시지)로는 절대 분류하지 않는다 (오탐 방지)
+  const stderr = err != null && typeof (err as { stderr?: unknown }).stderr === 'string'
+    ? (err as { stderr: string }).stderr : '';
+  if (stderr && AUTH_PATTERNS.test(stderr)) {
+    return new BrainAuthError(`claude CLI 인증/한도 문제: ${stderr.slice(0, 200)}`);
+  }
+  return err instanceof Error ? err : new Error(String(err));
 }
 
 export interface BrainOptions {
   claudeCmd: string;
-  /** timeoutMs는 재시도 포함 총 상한 (기본값 180,000ms). 내부적으로 시도당 절반씩 배분. */
+  /** timeoutMs는 재시도 포함 총 상한 (기본값 180,000ms). 각 시도는 timeoutMs/2, 최악의 경우 총 timeoutMs까지. */
   timeoutMs?: number;
 }
 
@@ -52,10 +54,17 @@ export async function runClaudeText(
   const { stdout } = await pExecFile(
     opts.claudeCmd,
     ['-p', prompt, '--output-format', 'json'],
-    { timeout: opts.timeoutMs, maxBuffer: 10 * 1024 * 1024 },
+    { timeout: opts.timeoutMs, killSignal: 'SIGKILL', maxBuffer: 10 * 1024 * 1024 },
   );
   const envelope = JSON.parse(stdout);
-  return typeof envelope === 'string' ? envelope : String(envelope.result ?? '');
+  if (typeof envelope !== 'string') {
+    const result = envelope.result;
+    if (result == null || result === '') {
+      throw new Error(`claude 응답 envelope에 result가 없습니다: ${stdout.slice(0, 300)}`);
+    }
+    return String(result);
+  }
+  return envelope;
 }
 
 /** claude -p 헤드리스 호출. 실패 시 1회 재시도, 그래도 실패하면 throw (사이클 스킵용). BrainAuthError는 즉시 throw. */

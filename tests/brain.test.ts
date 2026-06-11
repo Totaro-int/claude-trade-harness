@@ -51,4 +51,10 @@ describe('thesis 스키마 & 세션 만료', () => {
     await expect(runBrain('p', { claudeCmd: 'tests/fixtures/claude-stub-auth-error.sh', timeoutMs: 5000 }))
       .rejects.toThrow(BrainAuthError);
   });
+
+  it('LLM 텍스트의 rate limit 문구는 BrainAuthError로 오분류되지 않는다', async () => {
+    const err = await runBrain('p', { claudeCmd: 'tests/fixtures/claude-stub-ratelimit-text.sh', timeoutMs: 5000 }).catch(e => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(BrainAuthError);
+  });
 });
