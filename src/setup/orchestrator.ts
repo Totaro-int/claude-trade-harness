@@ -44,7 +44,7 @@ export class SetupOrchestrator {
   }
 
   async registerBroker(reg: BrokerReg): Promise<void> {
-    if (!/^[a-z0-9-]+$/.test(reg.brokerId)) throw new Error('brokerId는 소문자/숫자/하이픈만 허용됩니다');
+    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(reg.brokerId)) throw new Error('brokerId는 소문자/숫자/하이픈만 허용됩니다');
     this.#broker = reg;
     saveEnvFile({ BROKER_API_KEY: reg.apiKey, BROKER_API_SECRET: reg.apiSecret, BROKER_ACCOUNT_NO: reg.accountNo }, join(this.#root, '.env'));
     mkdirSync(join(this.#root, 'adapters'), { recursive: true });
@@ -83,7 +83,7 @@ export class SetupOrchestrator {
   }
 
   async saveStrategyDoc(filename: string, content: string): Promise<void> {
-    if (!/^[\w.-]+\.(md|txt)$/.test(filename)) throw new Error('파일명은 영숫자 + .md/.txt만 허용됩니다');
+    if (!/^\w[\w.-]*\.(md|txt)$/.test(filename)) throw new Error('파일명은 영숫자 + .md/.txt만 허용됩니다');
     mkdirSync(join(this.#root, 'strategy'), { recursive: true });
     writeFileSync(join(this.#root, 'strategy', filename), content);
   }
@@ -95,17 +95,35 @@ export class SetupOrchestrator {
     const text = await runClaudeText(prompt, { claudeCmd: this.#claudeCmd, timeoutMs: 300_000 });
     const m = text.match(/```(?:json)?\n([\s\S]*?)```/);
     if (!m) throw new Error('전략 생성 응답 파싱 실패');
-    const parsed = JSON.parse(m[1]!) as { strategyMd: string; universe: Array<{ symbol: string; name: string }> };
+    let parsed: { strategyMd: string; universe: Array<{ symbol: string; name: string }> };
+    try {
+      parsed = JSON.parse(m[1]!) as { strategyMd: string; universe: Array<{ symbol: string; name: string }> };
+    } catch (e) {
+      throw new Error(`전략 생성 응답이 유효한 JSON이 아닙니다: ${(e as Error).message}`);
+    }
+    if (typeof parsed.strategyMd !== 'string' || parsed.strategyMd.length === 0 || !Array.isArray(parsed.universe)) {
+      throw new Error('전략 응답 구조가 올바르지 않습니다');
+    }
+    const universe = parsed.universe
+      .filter(e => typeof e?.symbol === 'string' && typeof e?.name === 'string')
+      .slice(0, 30);
     mkdirSync(join(this.#root, 'strategy'), { recursive: true });
     writeFileSync(join(this.#root, 'strategy', 'strategy.md'), parsed.strategyMd);
-    writeFileSync(join(this.#root, 'strategy', 'universe.json'), JSON.stringify(parsed.universe, null, 2));
+    writeFileSync(join(this.#root, 'strategy', 'universe.json'), JSON.stringify(universe, null, 2));
   }
 
   async finish(opts: { mode: 'paper' | 'live'; guardrails: Record<string, number>; agreed: boolean }): Promise<void> {
     if (!opts.agreed) throw new Error('면책 고지에 동의해야 시작할 수 있습니다');
     if (!this.#broker) throw new Error('브로커 미등록');
     const cfgPath = join(this.#root, 'config.json');
-    const existing = existsSync(cfgPath) ? JSON.parse(readFileSync(cfgPath, 'utf-8')) : {};
+    let existing: Record<string, unknown> = {};
+    if (existsSync(cfgPath)) {
+      try {
+        existing = JSON.parse(readFileSync(cfgPath, 'utf-8')) as Record<string, unknown>;
+      } catch (e) {
+        throw new Error(`기존 config.json이 손상되었습니다: ${(e as Error).message}`);
+      }
+    }
     writeFileSync(cfgPath, JSON.stringify({
       ...existing, mode: opts.mode, brokerId: this.#broker.brokerId,
       guardrails: { ...(existing.guardrails ?? {}), ...opts.guardrails },
@@ -113,7 +131,8 @@ export class SetupOrchestrator {
   }
 
   #env(): AdapterEnv {
-    const r = this.#broker!;
+    if (!this.#broker) throw new Error('브로커 미등록');
+    const r = this.#broker;
     return { apiKey: r.apiKey, apiSecret: r.apiSecret, accountNo: r.accountNo, baseUrl: r.baseUrl };
   }
 }

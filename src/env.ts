@@ -11,6 +11,9 @@ export function loadEnvFile(path = '.env'): Record<string, string> {
 }
 
 export function saveEnvFile(vars: Record<string, string>, path = '.env'): void {
+  for (const [k, v] of Object.entries(vars)) {
+    if (/[\n\r]/.test(v)) throw new Error(`환경변수 값에 줄바꿈을 포함할 수 없습니다: ${k}`);
+  }
   const merged = { ...loadEnvFile(path), ...vars };
   writeFileSync(path, Object.entries(merged).map(([k, v]) => `${k}=${v}`).join('\n') + '\n', { mode: 0o600 });
 }
