@@ -5,7 +5,7 @@ export interface PendingOrder extends OrderRequest {
   limitPrice: number; // PENDING은 항상 LIMIT
 }
 
-interface BrokerRates { feeRate: number; taxRate: number; halfSpreadPct: number }
+export interface BrokerRates { feeRate: number; taxRate: number; halfSpreadPct: number }
 
 interface BrokerState {
   cash: number;
@@ -89,13 +89,19 @@ export class PaperBroker {
   /** bid==ask(스프레드 정보 없음)이면 현실적 half-spread를 적용한 체결가 산출 */
   #execPrice(side: 'BUY' | 'SELL', q: Quote): number {
     if (q.bid !== q.ask) return side === 'BUY' ? q.ask : q.bid;
-    const adj = side === 'BUY' ? 1 + this.#rates.halfSpreadPct : 1 - this.#rates.halfSpreadPct;
-    return Math.round(q.price * adj);
+    const spread = Math.round(q.price * this.#rates.halfSpreadPct);
+    return side === 'BUY' ? q.price + spread : q.price - spread;
   }
 
-  setThesis(symbol: string, thesis: Thesis): void {
+  /**
+   * 포지션에 thesis를 저장한다.
+   * @returns 포지션이 존재하면 `true`, 포지션 없음(no-op)이면 `false`
+   */
+  setThesis(symbol: string, thesis: Thesis): boolean {
     const pos = this.#positions.get(symbol);
-    if (pos) this.#positions.set(symbol, { ...pos, thesis, openedAt: pos.openedAt ?? new Date().toISOString() });
+    if (!pos) return false;
+    this.#positions.set(symbol, { ...pos, thesis, openedAt: pos.openedAt ?? new Date().toISOString() });
+    return true;
   }
 
   #fill(order: OrderRequest, px: number): FillResult {
@@ -118,6 +124,7 @@ export class PaperBroker {
       } else {
         this.#positions.set(order.symbol, {
           symbol: order.symbol, name: order.name, quantity: order.quantity, avgPrice: px,
+          openedAt: new Date().toISOString(),
         });
       }
       return { status: 'FILLED', fillPrice: px, fee, tax: 0 };

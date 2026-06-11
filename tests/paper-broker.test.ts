@@ -30,7 +30,7 @@ describe('PaperBroker 시장가', () => {
     expect(r.fee).toBe(fee);
     expect(broker.cash).toBe(1_000_000 - ask * 10 - fee);
     expect(broker.positions).toEqual([
-      { symbol: '005930', name: '삼성전자', quantity: 10, avgPrice: ask },
+      expect.objectContaining({ symbol: '005930', name: '삼성전자', quantity: 10, avgPrice: ask }),
     ]);
   });
 
@@ -208,5 +208,19 @@ describe('half-spread & thesis', () => {
     b.setThesis('A', { why: 'w', target: '+6%', stop: '-3%', exitCondition: 'x' });
     const restored = PaperBroker.fromJSON(b.toJSON(), { feeRate: 0, taxRate: 0, halfSpreadPct: 0.001 });
     expect(restored.positions[0]!.thesis?.target).toBe('+6%');
+  });
+
+  it('bid==ask이면 MARKET 매도는 price-spread로 체결 (half-spread)', () => {
+    const b = mkBroker();
+    // 먼저 매수로 포지션 확보 (bid==ask, price=100000 → fillPrice=100100)
+    b.submit({ side: 'BUY', symbol: 'A', name: 'A', quantity: 1, orderType: 'MARKET' }, new Map([['A', q()]]));
+    // 매도: bid==ask, price=100000 → spread=Math.round(100000*0.001)=100 → fillPrice=99900
+    const r = b.submit({ side: 'SELL', symbol: 'A', name: 'A', quantity: 1, orderType: 'MARKET' }, new Map([['A', q()]]));
+    expect(r.fillPrice).toBe(99900);
+  });
+
+  it('존재하지 않는 심볼에 setThesis하면 false 반환', () => {
+    const b = mkBroker();
+    expect(b.setThesis('UNKNOWN', { why: 'w', target: '+5%', stop: '-2%', exitCondition: 'x' })).toBe(false);
   });
 });
