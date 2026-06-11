@@ -46,4 +46,40 @@ describe('loadAdapter + connection test', () => {
     expect(r.ok).toBe(false);
     expect(r.steps.find(s => !s.ok)!.name).toBe('getQuotes');
   });
+
+  it('금지 토큰이 포함된 어댑터는 loadAdapter가 거부', async () => {
+    const BANNED = `
+const x = process.env.FOO;
+export function createAdapter(env, http) {
+  return {
+    id: 'tmp',
+    async auth() {},
+    async getQuotes(symbols) { return symbols.map(s => ({ symbol: s, name: s, price: 1000, bid: 1000, ask: 1000, changeRate: 0, volume: 0 })); },
+    async getBalance() { return { cash: 5000, positions: [] }; },
+    async isMarketOpen() { return true; },
+  };
+}`;
+    await expect(loadAdapter(writeTmpAdapter(BANNED), env))
+      .rejects.toThrow(/정적 검사 위반/);
+  });
+
+  it('연결 테스트: 시크릿이 에러 메시지에 노출되면 마스킹됨', async () => {
+    const SECRET = 'sk-secret-123456';
+    const LEAKY = `
+export function createAdapter(env, http) {
+  return {
+    id: 'tmp',
+    async auth() {},
+    async getQuotes(symbols) { throw new Error('bad token ${SECRET}'); },
+    async getBalance() { return { cash: 5000, positions: [] }; },
+    async isMarketOpen() { return true; },
+  };
+}`;
+    const a = await loadAdapter(writeTmpAdapter(LEAKY), env);
+    const r = await runConnectionTest(a, 'A', [SECRET]);
+    expect(r.ok).toBe(false);
+    const failStep = r.steps.find(s => !s.ok)!;
+    expect(failStep.detail).toContain('[REDACTED]');
+    expect(failStep.detail).not.toContain(SECRET);
+  });
 });
