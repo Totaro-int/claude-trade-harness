@@ -51,16 +51,32 @@ $('btn-strategy-upload').onclick = async () => {
 };
 
 $('btn-strategy-gen').onclick = async () => {
+  $('btn-strategy-gen').disabled = true;
   $('strategy-log').hidden = false;
   appendLog($('strategy-log'), 'Claude가 전략을 작성 중...');
   try {
+    const es = new EventSource('/api/setup/progress');
+    es.onmessage = (e) => {
+      const d = JSON.parse(e.data);
+      appendLog($('strategy-log'), d.message);
+      if (d.done) {
+        es.close();
+        if (d.ok) {
+          show('step-finish');
+        } else {
+          appendLog($('strategy-log'), '❌ 전략 생성 실패 — 설정을 확인하고 다시 시도하세요.');
+          $('btn-strategy-gen').disabled = false;
+        }
+      }
+    };
     await post('/api/setup/strategy/interview', {
       risk: $('risk').value, capital: 10000000, horizon: $('horizon').value,
       sectors: $('sectors').value.split(',').map(s => s.trim()).filter(Boolean),
     });
-    appendLog($('strategy-log'), '완료 — strategy/strategy.md 생성됨');
-    setTimeout(() => show('step-finish'), 800);
-  } catch (err) { appendLog($('strategy-log'), '실패: ' + err.message); }
+  } catch (err) {
+    appendLog($('strategy-log'), '실패: ' + err.message);
+    $('btn-strategy-gen').disabled = false;
+  }
 };
 
 $('btn-finish').onclick = async () => {
