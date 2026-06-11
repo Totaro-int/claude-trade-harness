@@ -148,7 +148,10 @@ async function main(): Promise<void> {
       if (err instanceof BrainAuthError) {
         consecutiveAuthErrors++;
         store.setKV('warning', 'claude CLI 인증 필요 — 터미널에서 claude login 후 재시작');
-        notifyMac('open-trader: claude CLI 인증 필요 — 터미널에서 claude login 후 재시작');
+        // 스트릭 첫 오류에만 알림 발송 (반복 사이클 중복 알림 방지)
+        if (consecutiveAuthErrors === 1) {
+          notifyMac('open-trader: claude CLI 인증 필요 — 터미널에서 claude login 후 재시작');
+        }
       }
       throw err;
     }
