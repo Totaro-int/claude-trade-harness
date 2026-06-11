@@ -240,7 +240,13 @@ function createSetupHandler(deps: ServerDeps, progressClients: Set<ServerRespons
 
     // POST /api/setup/strategy/interview (async, 202)
     if (req.method === 'POST' && pathname === '/api/setup/strategy/interview') {
-      const profile = await readJson(req) as Parameters<SetupOrchestrator['generateStrategy']>[0];
+      let profile: Parameters<SetupOrchestrator['generateStrategy']>[0];
+      try {
+        profile = await readJson(req) as Parameters<SetupOrchestrator['generateStrategy']>[0];
+      } catch (err) {
+        json(res, 400, { error: (err as Error).message });
+        return true;
+      }
       res.writeHead(202, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
       void (async () => {
@@ -326,7 +332,8 @@ export async function startServer(deps: ServerDeps): Promise<() => void> {
           try {
             const body = await readJson(req) as { last4?: string };
             const expected = process.env['BROKER_ACCOUNT_NO']?.slice(-4);
-            if (!expected || body.last4 !== expected) {
+            const last4 = body.last4;
+            if (!expected || expected.length !== 4 || last4 !== expected) {
               json(res, 400, { error: '계좌 확인 실패' });
               return;
             }
@@ -382,7 +389,7 @@ export async function startServer(deps: ServerDeps): Promise<() => void> {
 
   await new Promise<void>((resolvePromise, reject) => {
     server.once('error', reject);
-    server.listen(deps.port, resolvePromise);
+    server.listen(deps.port, '127.0.0.1', resolvePromise);
   });
 
   const modeLabel = deps.setupMode ? 'setup' : 'dashboard';

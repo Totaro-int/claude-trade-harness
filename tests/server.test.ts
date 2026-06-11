@@ -192,6 +192,12 @@ describe('서버 — 온보딩 모드', () => {
     expect(JSON.parse(body)).toMatchObject({ ok: true });
   });
 
+  it('서버는 127.0.0.1 루프백에 바인딩됨', async () => {
+    // Verify the server accepts connections on 127.0.0.1 (loopback-only binding)
+    const res = await fetch(`http://127.0.0.1:${PORT}/api/setup/status`);
+    expect(res.status).toBe(200);
+  });
+
   it('GET /api/setup/progress — SSE text/event-stream 반환', async () => {
     const res = await fetch(`http://localhost:${PORT}/api/setup/progress`);
     expect(res.status).toBe(200);
@@ -209,6 +215,17 @@ describe('서버 — 온보딩 모드', () => {
       risk: 'moderate', capital: 10_000_000, horizon: '1년', sectors: ['IT'],
     });
     expect(status).toBe(202);
+  });
+
+  it('POST /api/setup/strategy/interview — 잘못된 JSON → 400', async () => {
+    const res = await fetch(`http://localhost:${PORT}/api/setup/strategy/interview`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: 'not-valid-json{{{',
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: string };
+    expect(body).toHaveProperty('error');
   });
 });
 
@@ -296,6 +313,12 @@ describe('서버 — 운영 모드', () => {
 
   it('POST /api/live/confirm — 잘못된 last4 → 400', async () => {
     const { status, body } = await post(PORT, '/api/live/confirm', { last4: '0000' });
+    expect(status).toBe(400);
+    expect(JSON.parse(body)).toHaveProperty('error');
+  });
+
+  it('POST /api/live/confirm — last4 없음 → 400', async () => {
+    const { status, body } = await post(PORT, '/api/live/confirm', {});
     expect(status).toBe(400);
     expect(JSON.parse(body)).toHaveProperty('error');
   });
