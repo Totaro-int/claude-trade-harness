@@ -12,7 +12,7 @@ describe('generateAdapter', () => {
     const r = await generateAdapter({
       brokerId: '__test_gen',
       docsText: '# Fake API docs\nGET /quotes',
-      env: { apiKey: 'k', apiSecret: 's', accountNo: 'a', baseUrl: 'https://api.example.com' },
+      env: { apiKey: 'testkey123', apiSecret: 'testsecret456', accountNo: 'a', baseUrl: 'https://api.example.com' },
       claudeCmd: 'tests/fixtures/claude-stub-adapter.sh',
       outDir: OUT,
       maxAttempts: 1,
@@ -25,10 +25,20 @@ describe('generateAdapter', () => {
   it('코드 블록 없는 응답은 재시도 후 실패 보고', async () => {
     const r = await generateAdapter({
       brokerId: '__test_gen', docsText: 'x',
-      env: { apiKey: 'k', apiSecret: 's', accountNo: 'a', baseUrl: 'https://api.example.com' },
+      env: { apiKey: 'testkey123', apiSecret: 'testsecret456', accountNo: 'a', baseUrl: 'https://api.example.com' },
       claudeCmd: 'tests/fixtures/claude-stub-invalid.sh', outDir: OUT, maxAttempts: 2, onProgress: () => {},
     });
     expect(r.ok).toBe(false);
     expect(r.error).toBeTruthy();
+  }, 30000);
+
+  it('시크릿 하드코딩된 코드는 정적 검사 실패 보고', async () => {
+    const r = await generateAdapter({
+      brokerId: '__test_gen', docsText: 'x',
+      env: { apiKey: 'testkey123', apiSecret: 'testsecret456', accountNo: 'a', baseUrl: 'https://api.example.com' },
+      claudeCmd: 'tests/fixtures/claude-stub-adapter-leak.sh', outDir: OUT, maxAttempts: 1, onProgress: () => {},
+    });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/시크릿|정적 검사/);
   }, 30000);
 });

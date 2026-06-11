@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { AdapterEnv } from '../broker/adapter.js';
 import { runClaudeText } from '../brain/runner.js';
@@ -10,7 +10,7 @@ export interface GenerateInput {
   docsText: string;
   env: AdapterEnv;
   claudeCmd: string;
-  outDir: string;       // e.g. adapters/<brokerId>
+  outDir?: string;      // e.g. adapters/<brokerId>; defaults to join('adapters', brokerId)
   maxAttempts?: number; // default 3
   onProgress: (msg: string) => void;
 }
@@ -43,17 +43,26 @@ ${docsText.slice(0, 60000)}`;
 }
 
 function extractCode(text: string): string | null {
-  const m = text.match(/```(?:typescript|ts)?\n([\s\S]*?)```/);
+  const m = text.match(/```(?:typescript|ts)\n([\s\S]*?)```/);
   return m ? m[1]!.trim() : null;
 }
 
 export async function generateAdapter(input: GenerateInput): Promise<GenerateResult> {
+  if (!/^[a-z0-9_-]+$/.test(input.brokerId)) {
+    throw new Error(`brokerId "${input.brokerId}" is invalid — only [a-z0-9_-] allowed`);
+  }
+  const outDir = input.outDir ?? join('adapters', input.brokerId);
   const max = input.maxAttempts ?? 3;
-  const secrets = [input.env.apiKey, input.env.apiSecret].filter((s) => s.length >= 6);
+  const secrets = [input.env.apiKey, input.env.apiSecret, input.env.accountNo].filter(
+    (s) => s.length >= 6,
+  );
   let feedback: string | null = null;
 
+  // Safe wrapper so a throwing onProgress handler never breaks the result contract.
+  const progress = (m: string) => { try { input.onProgress(m); } catch {} };
+
   for (let attempt = 1; attempt <= max; attempt++) {
-    input.onProgress(`어댑터 생성 시도 ${attempt}/${max}...`);
+    progress(`어댑터 생성 시도 ${attempt}/${max}...`);
 
     let text: string;
     try {
@@ -69,24 +78,25 @@ export async function generateAdapter(input: GenerateInput): Promise<GenerateRes
     const code = extractCode(text);
     if (!code) {
       feedback = '응답에 TypeScript 코드 블록이 없음';
-      input.onProgress('코드 블록 추출 실패');
+      progress('코드 블록 추출 실패');
       continue;
     }
 
     const violations = checkAdapterSource(code, secrets);
     if (violations.length > 0) {
       feedback = `정적 검사 위반: ${violations.join('; ')}`;
-      input.onProgress(`정적 검사 실패: ${violations.join(', ')}`);
+      progress(`정적 검사 실패: ${violations.join(', ')}`);
       continue;
     }
 
-    mkdirSync(input.outDir, { recursive: true });
-    const filePath = join(input.outDir, 'adapter.ts');
-    writeFileSync(filePath, code);
+    mkdirSync(outDir, { recursive: true });
+    const tmpPath = join(outDir, 'adapter.tmp.ts');
+    const filePath = join(outDir, 'adapter.ts');
+    writeFileSync(tmpPath, code);
 
-    // Compile-check the generated file. The outDir must be under the repo root so
+    // Compile-check the tmp file. The outDir must be 2 levels deep under the repo root so
     // the relative import '../../src/broker/adapter.js' resolves correctly.
-    // e.g. adapters/__test_gen/adapter.ts → ../../src/broker/adapter.ts ✓
+    // e.g. adapters/__test_gen/adapter.tmp.ts → ../../src/broker/adapter.ts ✓
     // --ignoreConfig skips the project tsconfig.json (required when files are passed on CLI).
     try {
       execFileSync(
@@ -100,20 +110,22 @@ export async function generateAdapter(input: GenerateInput): Promise<GenerateRes
           '--module', 'nodenext',
           '--moduleResolution', 'nodenext',
           '--target', 'es2022',
-          resolve(filePath),
+          resolve(tmpPath),
         ],
         { stdio: 'pipe', cwd: process.cwd() },
       );
     } catch (err) {
+      rmSync(tmpPath, { force: true });
       const errOut = err != null && typeof (err as { stdout?: Buffer }).stdout !== 'undefined'
         ? String((err as { stdout: Buffer }).stdout)
         : String(err);
       feedback = `컴파일 실패: ${errOut.slice(0, 2000)}`;
-      input.onProgress('컴파일 실패 — 재생성');
+      progress('컴파일 실패 — 재생성');
       continue;
     }
 
-    input.onProgress('정적 검사·컴파일 통과');
+    renameSync(tmpPath, filePath);
+    progress('정적 검사·컴파일 통과');
     return { ok: true, path: filePath };
   }
 
