@@ -22,6 +22,7 @@ export interface CycleResult { skipped: boolean; reason?: string }
 
 const kstDate = (d: Date) => d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
 const nowISO = () => new Date().toISOString();
+const errMsg = (e: unknown) => e instanceof Error ? e.message : String(e);
 
 // KST 09:00~09:30 — dayOpenEquity 초기화 허용 시간창 (슬립 복귀 오염 방지)
 function inDayOpenWindow(d: Date): boolean {
@@ -39,7 +40,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
   try {
     quoteList = await adapter.getQuotes(symbols);
   } catch (err) {
-    store.recordDecision(errorRow(`시세 조회 실패: ${String(err)}`));
+    store.recordDecision(errorRow(`시세 조회 실패: ${errMsg(err)}`));
     deps.events?.emit('update');
     return { skipped: true, reason: String(err) };
   }
@@ -82,7 +83,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
       limits: config.guardrails, ordersToday,
     }));
   } catch (err) {
-    finishCycle(deps, quotes, dailyPnlPct, tickTrades, [errorRow(`브레인 호출 실패: ${String(err)}`)], ordersToday, ordersTodayKey, sellTimesFrom(tickTrades));
+    finishCycle(deps, quotes, dailyPnlPct, tickTrades, [errorRow(`브레인 호출 실패: ${errMsg(err)}`)], ordersToday, ordersTodayKey, sellTimesFrom(tickTrades));
     return { skipped: true, reason: String(err) };
   }
 
@@ -90,6 +91,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
   const trades: TradeRow[] = [...tickTrades];
   const decisionRows: DecisionRow[] = [];
   const sellTimes: Array<[string, string]> = sellTimesFrom(tickTrades);
+  const pendingTheses: Array<[string, string]> = [];
   let ordersThisCycle = 0;
 
   for (const decision of output.decisions) {
@@ -123,7 +125,8 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
       ordersThisCycle++; ordersToday++;
       if (decision.action === 'BUY' && decision.thesis) {
         // PENDING 매수의 thesis는 체결 시점에 적용하기 위해 KV에 보관 (onTick 체결 후 setThesis)
-        store.setKV(`pendingThesis:${order.symbol}`, JSON.stringify(decision.thesis));
+        // finishCycle의 atomic 블록 안에서 쓰여 broker KV와 함께 원자 저장된다
+        pendingTheses.push([`pendingThesis:${order.symbol}`, JSON.stringify(decision.thesis)]);
       }
       decisionRows.push(toRow(decision, output.marketView, 'PENDING', null, order.name));
     } else {
@@ -134,12 +137,22 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
   // 이번 틱에 체결된 매수에 보관된 thesis 적용
   for (const t of tickTrades) {
     if (t.side === 'BUY') {
-      const pt = store.getKV(`pendingThesis:${t.symbol}`);
-      if (pt) { broker.setThesis(t.symbol, JSON.parse(pt) as import('./types.js').Thesis); store.deleteKV(`pendingThesis:${t.symbol}`); }
+      const key = `pendingThesis:${t.symbol}`;
+      const pt = store.getKV(key);
+      if (pt) {
+        try {
+          broker.setThesis(t.symbol, JSON.parse(pt) as import('./types.js').Thesis);
+        } catch {
+          // corrupted entry dropped
+          store.deleteKV(key);
+          continue;
+        }
+        store.deleteKV(key);
+      }
     }
   }
 
-  finishCycle(deps, quotes, dailyPnlPct, trades, decisionRows, ordersToday, ordersTodayKey, sellTimes);
+  finishCycle(deps, quotes, dailyPnlPct, trades, decisionRows, ordersToday, ordersTodayKey, sellTimes, pendingTheses);
   return { skipped: false };
 }
 
@@ -166,7 +179,7 @@ async function collectIndicators(adapter: BrokerAdapter, universe: UniverseEntry
 }
 
 function toOrder(d: Decision, quotes: Map<string, Quote>): OrderRequest | null {
-  if (!d.symbol || !d.quantity || !d.orderType) return null;
+  if (!d.symbol || d.quantity == null || d.quantity <= 0 || !d.orderType) return null;
   if (d.orderType === 'LIMIT' && !d.limitPrice) return null;
   const name = quotes.get(d.symbol)?.name ?? d.symbol;
   return { side: d.action as 'BUY' | 'SELL', symbol: d.symbol, name, quantity: d.quantity, orderType: d.orderType, limitPrice: d.limitPrice };
@@ -194,7 +207,13 @@ function computeBenchmark(store: Store, quotes: Map<string, Quote>, universe: Un
     if (Object.keys(baseline).length === 0) return { value: null };
     return { value: initialCash, newBaseline: baseline };
   }
-  const baseline = JSON.parse(baselineRaw) as Record<string, number>;
+  // 손상된 baseline은 benchmark 표시만 포기 — 사이클은 계속 (fail-safe)
+  let baseline: Record<string, number>;
+  try {
+    baseline = JSON.parse(baselineRaw) as Record<string, number>;
+  } catch {
+    return { value: null };
+  }
   const ratios = Object.entries(baseline)
     .map(([s, p0]) => { const q = quotes.get(s); return q ? q.price / p0 : null; })
     .filter((x): x is number => x !== null);
@@ -206,6 +225,7 @@ function finishCycle(
   deps: CycleDeps, quotes: Map<string, Quote>, dailyPnlPct: number,
   trades: TradeRow[], decisionRows: DecisionRow[],
   ordersToday: number, ordersTodayKey: string, sellTimes: Array<[string, string]>,
+  pendingTheses: Array<[string, string]> = [],
 ): void {
   const { broker, store, universe, config } = deps;
   const equity = broker.equity(quotes);
@@ -220,6 +240,7 @@ function finishCycle(
     store.setKV(ordersTodayKey, String(ordersToday));
     for (const [sym, ts] of sellTimes) store.setKV(`lastSell:${sym}`, ts);
     if (newBaseline) store.setKV('benchmarkBaseline', JSON.stringify(newBaseline));
+    for (const [key, val] of pendingTheses) store.setKV(key, val);
   });
   deps.events?.emit('update');
 }

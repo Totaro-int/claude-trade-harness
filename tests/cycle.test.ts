@@ -225,6 +225,35 @@ describe('신규 사이클 동작', () => {
     expect(store.getKV(`lastSell:${SYM}`)).not.toBeNull();
   });
 
+  it('틱 체결 시 pendingThesis가 포지션에 적용되고 KV가 삭제된다', async () => {
+    // cycle 1: LIMIT BUY below market → PENDING (pendingThesis collected into atomic block)
+    const { deps, broker, store } = makeDeps({
+      brain: async () => ({ marketView: '', decisions: [] }),
+    });
+    const mock = deps.adapter as MockAdapter;
+    mock.setPrice(SYM, 90_000);
+    const thesis = { why: '저점 매수', target: '+5%', stop: '-2%', exitCondition: '목표 도달' };
+    deps.brain = async () => ({
+      marketView: '대기',
+      decisions: [{
+        action: 'BUY', symbol: SYM, quantity: 2, orderType: 'LIMIT', limitPrice: 80_000,
+        reasoning: '지정가 대기', thesis,
+      }],
+    });
+    await runCycle(deps);
+    // pendingThesis KV should be written atomically
+    expect(store.getKV(`pendingThesis:${SYM}`)).not.toBeNull();
+    expect(broker.positions).toHaveLength(0);
+
+    // cycle 2: price crosses limit → tick fill → thesis applied
+    mock.setPrice(SYM, 79_000);
+    deps.brain = async () => ({ marketView: '체결', decisions: [{ action: 'HOLD', reasoning: '대기' }] });
+    await runCycle(deps);
+    expect(broker.positions).toHaveLength(1);
+    expect(broker.positions[0]!.thesis?.why).toBe('저점 매수');
+    expect(store.getKV(`pendingThesis:${SYM}`)).toBeNull();
+  });
+
   it('ordersToday KV가 체결마다 증가한다', async () => {
     const { deps, store } = makeDeps({
       brain: async () => ({
