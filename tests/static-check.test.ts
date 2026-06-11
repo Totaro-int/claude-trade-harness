@@ -37,4 +37,13 @@ describe('checkAdapterSource', () => {
   it('createAdapter export 없으면 위반', () => {
     expect(checkAdapterSource(`export const x = 1;`, SECRETS).length).toBeGreaterThan(0);
   });
+  it('간접 eval 참조 차단 (const _e = eval; _e("x"))', () => {
+    expect(checkAdapterSource(ok + `\nconst _e = eval; _e('x');`, SECRETS).length).toBeGreaterThan(0);
+  });
+  it('AsyncFunction constructor 우회 차단', () => {
+    expect(checkAdapterSource(ok + `\n(async function(){}).constructor('return 1')();`, SECRETS).length).toBeGreaterThan(0);
+  });
+  it('import.meta 접근 차단', () => {
+    expect(checkAdapterSource(ok + `\nconst u = import.meta.url;`, SECRETS).length).toBeGreaterThan(0);
+  });
 });

@@ -14,10 +14,13 @@ export function createHttpClient(baseUrl: string, fetcher: Fetcher = globalThis.
       headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(15_000),
+      // 리다이렉트 금지 — 브로커 응답이 외부 호스트로 토큰을 유출하는 것 차단
+      redirect: 'error',
     });
     let res = await doFetch();
     if (res.status === 429) {
-      const wait = Math.min(Number(res.headers.get('Retry-After') ?? '1'), 30);
+      const raw = Number(res.headers.get('Retry-After') ?? '1');
+      const wait = Number.isFinite(raw) && raw > 0 ? Math.min(raw, 30) : 1;
       await new Promise(r => setTimeout(r, wait * 1000));
       res = await doFetch();
     }

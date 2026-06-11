@@ -29,4 +29,21 @@ describe('createHttpClient', () => {
     const http = createHttpClient('https://api.broker.com', fetcher as never);
     await expect(http.get('/x')).rejects.toThrow(/HTTP 500/);
   });
+
+  it('POST 요청 시 JSON body가 fetcher에 전달됨', async () => {
+    const fetcher = vi.fn(async () => new Response('{"status":"ok"}', { status: 200 }));
+    const http = createHttpClient('https://api.broker.com', fetcher as never);
+    await http.post('/v1/order', { symbol: 'AAPL', qty: 1 });
+    const [, options] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+    expect(options.method).toBe('POST');
+    expect(options.body).toBe(JSON.stringify({ symbol: 'AAPL', qty: 1 }));
+  });
+
+  it('fetcher 호출 시 redirect:"error" 옵션이 포함됨', async () => {
+    const fetcher = vi.fn(async () => new Response('{"ok":true}', { status: 200 }));
+    const http = createHttpClient('https://api.broker.com', fetcher as never);
+    await http.get('/v1/quotes');
+    const [, options] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+    expect((options as RequestInit & { redirect: string }).redirect).toBe('error');
+  });
 });
