@@ -29,4 +29,26 @@ describe('buildPrompt', () => {
     const p = buildPrompt({ ...base, indicators: [] });
     expect(p).toContain('지표 데이터 없음');
   });
+
+  it('thesis 없는 포지션은 "thesis 없음" 표기', () => {
+    const p = buildPrompt({
+      ...base,
+      positions: [{ symbol: '005930', name: '삼성전자', quantity: 10, avgPrice: 70000 }],
+    });
+    expect(p).toContain('thesis 없음');
+  });
+
+  it('지표 없는 종목의 인용료 행은 "- | - | -" 렌더링', () => {
+    const p = buildPrompt({
+      ...base,
+      indicators: [],
+      quotes: [{ symbol: '005930', name: '삼성전자', price: 71000, bid: 70900, ask: 71100, changeRate: 1.4, volume: 1000 }],
+    });
+    expect(p).toMatch(/\| 삼성전자 \| 005930 \| [0-9,]+ \| 1\.4% \| - \| - \| - \|/);
+  });
+
+  it('프롬프트는 일일 손실 한도 제약을 포함한다', () => {
+    const p = buildPrompt(base);
+    expect(p).toMatch(/일일 손실 3% 도달 시 신규 매수가 차단됨/);
+  });
 });

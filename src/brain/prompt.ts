@@ -21,7 +21,7 @@ export function buildPrompt(i: PromptInput): string {
   const quoteRows = i.quotes.map(q => {
     const r = ind.get(q.symbol);
     const extra = r
-      ? `${r.ma5 ? won(r.ma5) : '-'} | ${r.ma20 ? won(r.ma20) : '-'} | ${r.change5d != null ? r.change5d.toFixed(1) + '%' : '-'}`
+      ? `${r.ma5 != null ? won(r.ma5) : '-'} | ${r.ma20 != null ? won(r.ma20) : '-'} | ${r.change5d != null ? r.change5d.toFixed(1) + '%' : '-'}`
       : '- | - | -';
     return `| ${q.name} | ${q.symbol} | ${won(q.price)} | ${q.changeRate}% | ${extra} |`;
   }).join('\n');
@@ -63,7 +63,7 @@ ${recent}
 \`\`\`
 
 ## 제약 (코드로 강제됨 — 위반 주문은 거부됩니다)
-- 종목당 비중 ≤ ${i.limits.maxPositionPct}%, 1회 주문 ≤ 총자산의 ${i.limits.maxOrderPct}%
+- 종목당 비중 ≤ ${i.limits.maxPositionPct}%, 1회 주문 ≤ 총자산의 ${i.limits.maxOrderPct}%, 일일 손실 ${i.limits.dailyLossLimitPct}% 도달 시 신규 매수가 차단됨 (매도는 허용)
 - 사이클당 ≤ ${i.limits.maxOrdersPerCycle}건, 일일 ≤ ${i.limits.maxOrdersPerDay}건, 총 노출 ≤ ${i.limits.maxTotalExposurePct}%
 - 매도 후 같은 종목 재매수는 ${i.limits.reentryCooldownMin}분 쿨다운
 
