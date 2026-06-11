@@ -109,6 +109,10 @@ export class Store {
     return row?.value ?? null;
   }
 
+  deleteKV(key: string): void {
+    this.#db.prepare('DELETE FROM kv WHERE key = ?').run(key);
+  }
+
   /**
    * 콜백 안의 모든 기록을 단일 SQLite 트랜잭션으로 묶는다 (체결-상태 원자성).
    * - 콜백은 반드시 동기여야 한다 — async 콜백은 타입 에러로 차단된다 (트랜잭션이 await 전에 커밋되는 사고 방지).

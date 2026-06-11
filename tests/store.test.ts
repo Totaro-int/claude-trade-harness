@@ -36,6 +36,13 @@ describe('Store', () => {
     expect(store.getKV('없는키')).toBeNull();
   });
 
+  it('deleteKV: setKV 후 deleteKV하면 getKV가 null을 반환한다', () => {
+    store.setKV('testKey', 'testValue');
+    expect(store.getKV('testKey')).toBe('testValue');
+    store.deleteKV('testKey');
+    expect(store.getKV('testKey')).toBeNull();
+  });
+
   it('close 후에는 쿼리가 던져진다', () => {
     store.close();
     expect(() => store.getTrades(1)).toThrow();

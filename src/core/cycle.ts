@@ -111,6 +111,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
     }
 
     const result = broker.submit(order, quotes);
+    // ordersToday는 '오늘 제출한 주문 수' — PENDING 시점에 1회 계상, 이후 틱 체결 시 재계상 없음
     if (result.status === 'FILLED') {
       ordersThisCycle++; ordersToday++;
       trades.push({ ts: nowISO(), side: order.side, symbol: order.symbol, name: order.name,
@@ -134,7 +135,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
   for (const t of tickTrades) {
     if (t.side === 'BUY') {
       const pt = store.getKV(`pendingThesis:${t.symbol}`);
-      if (pt) { broker.setThesis(t.symbol, JSON.parse(pt) as import('./types.js').Thesis); store.setKV(`pendingThesis:${t.symbol}`, ''); }
+      if (pt) { broker.setThesis(t.symbol, JSON.parse(pt) as import('./types.js').Thesis); store.deleteKV(`pendingThesis:${t.symbol}`); }
     }
   }
 
@@ -185,21 +186,20 @@ function errorRow(msg: string): DecisionRow {
     limitPrice: null, reasoning: msg, status: 'ERROR', rejectReason: null, marketView: '', thesis: null };
 }
 
-function computeBenchmark(store: Store, quotes: Map<string, Quote>, universe: UniverseEntry[], initialCash: number): number | null {
+function computeBenchmark(store: Store, quotes: Map<string, Quote>, universe: UniverseEntry[], initialCash: number): { value: number | null; newBaseline?: Record<string, number> } {
   const baselineRaw = store.getKV('benchmarkBaseline');
   if (!baselineRaw) {
     const baseline: Record<string, number> = {};
     for (const u of universe) { const q = quotes.get(u.symbol); if (q) baseline[u.symbol] = q.price; }
-    if (Object.keys(baseline).length === 0) return null;
-    store.setKV('benchmarkBaseline', JSON.stringify(baseline));
-    return initialCash;
+    if (Object.keys(baseline).length === 0) return { value: null };
+    return { value: initialCash, newBaseline: baseline };
   }
   const baseline = JSON.parse(baselineRaw) as Record<string, number>;
   const ratios = Object.entries(baseline)
     .map(([s, p0]) => { const q = quotes.get(s); return q ? q.price / p0 : null; })
     .filter((x): x is number => x !== null);
-  if (ratios.length === 0) return null;
-  return Math.round(initialCash * (ratios.reduce((a, b) => a + b, 0) / ratios.length));
+  if (ratios.length === 0) return { value: null };
+  return { value: Math.round(initialCash * (ratios.reduce((a, b) => a + b, 0) / ratios.length)) };
 }
 
 function finishCycle(
@@ -209,7 +209,7 @@ function finishCycle(
 ): void {
   const { broker, store, universe, config } = deps;
   const equity = broker.equity(quotes);
-  const benchmark = computeBenchmark(store, quotes, universe, config.initialCash);
+  const { value: benchmark, newBaseline } = computeBenchmark(store, quotes, universe, config.initialCash);
   // 체결·판단·스냅샷·브로커 상태를 단일 트랜잭션으로 — 크래시 시 기록-상태 불일치 방지
   store.atomic(() => {
     for (const t of trades) store.recordTrade(t);
@@ -219,6 +219,7 @@ function finishCycle(
     store.setKV('lastQuotes', JSON.stringify([...quotes.values()]));
     store.setKV(ordersTodayKey, String(ordersToday));
     for (const [sym, ts] of sellTimes) store.setKV(`lastSell:${sym}`, ts);
+    if (newBaseline) store.setKV('benchmarkBaseline', JSON.stringify(newBaseline));
   });
   deps.events?.emit('update');
 }
