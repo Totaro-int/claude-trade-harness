@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>open-trader 설정</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="wrap" id="setup-root">
+    <div class="row" style="margin-bottom:18px">
+      <h1>open-trader 시작하기</h1>
+      <span class="badge">SETUP</span>
+    </div>
+    <div class="steps" id="steps">
+      <div class="dot on"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div>
+    </div>
+
+    <section class="card" id="step-broker">
+      <h2>① 증권사 연결</h2>
+      <p class="sub">증권사 OpenAPI 문서 URL과 API 키를 입력하면 Claude가 어댑터를 자동 생성합니다. 키는 이 컴퓨터의 .env 파일에만 저장됩니다.</p>
+      <label>증권사 이름 <input id="brokerName" placeholder="예: 한국투자증권"></label>
+      <label>브로커 ID (영문 소문자) <input id="brokerId" placeholder="예: kis"></label>
+      <label>API Base URL <input id="baseUrl" placeholder="https://openapi.example.com"></label>
+      <label>OpenAPI 문서 URL (줄바꿈으로 여러 개) <textarea id="docsUrls" rows="3" placeholder="https://.../openapi.json"></textarea></label>
+      <label>API Key <input id="apiKey" type="password"></label>
+      <label>API Secret <input id="apiSecret" type="password"></label>
+      <label>계좌번호 <input id="accountNo"></label>
+      <button class="primary" id="btn-broker" style="margin-top:18px">어댑터 생성 시작</button>
+    </section>
+
+    <section class="card" id="step-generate" hidden>
+      <h2>② 어댑터 생성 중</h2>
+      <p class="sub">Claude가 API 문서를 읽고 어댑터 코드를 작성합니다. 생성된 코드는 정적 검사·컴파일·실연결 테스트를 통과해야 활성화됩니다.</p>
+      <div class="log" id="gen-log"></div>
+    </section>
+
+    <section class="card" id="step-test" hidden>
+      <h2>③ 연결 테스트</h2>
+      <label>테스트 종목코드 <input id="testSymbol" placeholder="예: 005930"></label>
+      <button class="primary" id="btn-test" style="margin-top:14px">인증 → 시세 → 잔고 테스트</button>
+      <div class="log" id="test-log" style="margin-top:12px"></div>
+    </section>
+
+    <section class="card" id="step-strategy" hidden>
+      <h2>④ 전략 설정</h2>
+      <p class="sub">전략 문서를 업로드하거나, 몇 가지 질문에 답하면 Claude가 초안을 만들어줍니다.</p>
+      <label>전략 문서 직접 입력 (Markdown) <textarea id="strategyText" rows="6" placeholder="# 내 전략..."></textarea></label>
+      <button class="primary" id="btn-strategy-upload" style="margin-top:10px">이 문서 사용</button>
+      <hr style="border-color:var(--line);margin:18px 0">
+      <p class="sub">또는 인터뷰로 생성:</p>
+      <label>성향 <select id="risk"><option>보수</option><option selected>중립</option><option>공격</option></select></label>
+      <label>투자 기간 <select id="horizon"><option>단기(수일)</option><option selected>스윙(수주)</option><option>중장기(수개월)</option></select></label>
+      <label>선호 섹터 (쉼표 구분) <input id="sectors" placeholder="반도체, 2차전지"></label>
+      <button class="primary" id="btn-strategy-gen" style="margin-top:14px">Claude에게 전략 생성 요청</button>
+      <div class="log" id="strategy-log" style="margin-top:12px" hidden></div>
+    </section>
+
+    <section class="card" id="step-finish" hidden>
+      <h2>⑤ 운전 시작</h2>
+      <p class="sub">가드레일은 코드로 강제됩니다. 기본값을 권장합니다.</p>
+      <label>종목당 최대 비중 % <input id="g-maxPositionPct" type="number" value="20"></label>
+      <label>일일 최대 주문 수 <input id="g-maxOrdersPerDay" type="number" value="10"></label>
+      <label>일일 손실 한도 % (도달 시 매수 정지) <input id="g-dailyLossLimitPct" type="number" value="3"></label>
+      <div class="card" style="background:var(--card-2);margin-top:16px">
+        <p class="sub">⚠ 모든 운전은 <b style="color:var(--text)">페이퍼 모드(가상 체결)</b>로 시작합니다. 이 소프트웨어는 투자 손실에 대해 어떤 책임도 지지 않으며, 모든 매매 결과는 사용자 본인 책임입니다.</p>
+        <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="agree" style="width:auto"> 위 내용을 이해했고 동의합니다</label>
+      </div>
+      <button class="primary" id="btn-finish" style="margin-top:16px">페이퍼 트레이딩 시작</button>
+    </section>
+  </div>
+  <script src="/setup.js"></script>
+</body>
+</html>

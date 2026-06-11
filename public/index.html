@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>open-trader</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/vendor/uplot.min.css">
+</head>
+<body>
+  <div class="wrap">
+    <div class="row" style="margin-bottom:18px">
+      <div class="row" style="gap:10px">
+        <h1>open-trader</h1>
+        <span class="badge" id="mode-badge">PAPER</span>
+        <span class="badge ok" id="broker-badge">연결 확인 중…</span>
+      </div>
+      <span class="sub" id="status-line">—</span>
+    </div>
+    <div class="card" id="warn-banner" hidden style="border:1px solid var(--red)">
+      <span class="sub" id="warn-text" style="color:var(--red)"></span>
+    </div>
+
+    <div class="grid3">
+      <div class="card">
+        <div class="sub">총자산</div>
+        <div id="equity" style="font-size:28px;font-weight:800;margin:2px 0">—</div>
+        <div id="pnl" style="font-size:13px;font-weight:600">—</div>
+      </div>
+      <div class="card">
+        <div class="sub">vs 벤치마크</div>
+        <div id="bench-diff" style="font-size:22px;font-weight:800;margin:2px 0">—</div>
+        <div class="sub" id="bench-abs">—</div>
+      </div>
+      <div class="card">
+        <div class="sub">오늘 거래</div>
+        <div id="orders-today" style="font-size:22px;font-weight:800;margin:2px 0">—</div>
+        <div class="sub" id="fees-today">—</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="margin-bottom:8px">
+        <h2 style="margin:0">자산 추이</h2>
+        <span class="sub"><span class="up">— 내 자산</span> &nbsp;<span style="color:#566070">— 벤치마크</span></span>
+      </div>
+      <div id="chart"></div>
+    </div>
+
+    <div class="card">
+      <h2 id="positions-title">보유 포지션</h2>
+      <table>
+        <thead><tr><th>종목</th><th class="num">수량</th><th class="num">평단</th><th class="num">현재가</th><th class="num">평가손익</th></tr></thead>
+        <tbody id="positions"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>AI 판단 로그</h2>
+      <div id="decisions"></div>
+    </div>
+  </div>
+  <script src="/vendor/uplot.iife.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

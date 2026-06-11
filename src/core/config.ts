@@ -1,0 +1,66 @@
+import { readFileSync, existsSync } from 'node:fs';
+
+export interface GuardrailLimits {
+  maxPositionPct: number;       // 종목당 최대 비중 (정수 %)
+  maxOrderPct: number;          // 1회 주문 금액 상한 (정수 %)
+  maxOrdersPerCycle: number;
+  dailyLossLimitPct: number;    // 양수로 표기 (3 = -3% 도달 시)
+  maxOrdersPerDay: number;
+  reentryCooldownMin: number;   // 매도 후 동일 종목 재매수 금지 시간(분)
+  maxTotalExposurePct: number;  // 총 주식 노출 상한 (정수 %)
+}
+
+export interface AppConfig {
+  mode: 'paper' | 'live';
+  brokerId: string;             // adapters/<brokerId>/ — 빈 문자열이면 미설정(온보딩 모드)
+  initialCash: number;
+  feeRate: number;
+  taxRate: number;
+  halfSpreadPct: number;        // bid==ask 폴백 시 적용할 half-spread (소수, 0.0005 = 0.05%)
+  cycleMinutes: number;
+  guardrails: GuardrailLimits;
+  claudeCmd: string;
+  dbPath: string;
+  port: number;
+}
+
+const DEFAULTS: AppConfig = {
+  mode: 'paper',
+  brokerId: '',
+  initialCash: 10_000_000,
+  feeRate: 0.00015,
+  taxRate: 0.0018,
+  halfSpreadPct: 0.0005,
+  cycleMinutes: 30,
+  guardrails: {
+    maxPositionPct: 20,
+    maxOrderPct: 10,
+    maxOrdersPerCycle: 3,
+    dailyLossLimitPct: 3,
+    maxOrdersPerDay: 10,
+    reentryCooldownMin: 60,
+    maxTotalExposurePct: 80,
+  },
+  claudeCmd: 'claude',
+  dbPath: 'data/state.db',
+  port: 3000,
+};
+
+export function loadConfig(path = 'config.json'): AppConfig {
+  if (!existsSync(path)) return structuredClone(DEFAULTS);
+  let file: Partial<AppConfig>;
+  try {
+    file = JSON.parse(readFileSync(path, 'utf-8'));
+  } catch (err) {
+    throw new Error(`설정 파일이 올바른 JSON이 아닙니다 (${path}): ${(err as Error).message}`);
+  }
+  return {
+    ...structuredClone(DEFAULTS),
+    ...file,
+    guardrails: { ...DEFAULTS.guardrails, ...(file.guardrails ?? {}) },
+  };
+}
+
+export function isConfigured(path = 'config.json'): boolean {
+  return existsSync(path) && loadConfig(path).brokerId !== '';
+}
