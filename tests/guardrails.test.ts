@@ -121,4 +121,17 @@ describe('신규 가드레일', () => {
     const sell = { ...buy, side: 'SELL' as const };
     expect(checkOrder(sell, baseCtx({ ordersToday: 99, lastSellAt: new Date().toISOString() }), limits).allowed).toBe(true);
   });
+
+  it('lastSellAt이 유효하지 않은 문자열이면 거부 (fail-safe)', () => {
+    const r = checkOrder(buy, baseCtx({ lastSellAt: 'not-a-date' }), limits);
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toMatch(/유효하지 않음/);
+  });
+
+  it('lastSellAt이 미래 시각이면 쿨다운 이내로 취급하여 거부', () => {
+    const futureIso = new Date('2026-06-11T06:00:00Z').toISOString(); // baseCtx.now(05:00)보다 1시간 뒤
+    const r = checkOrder(buy, baseCtx({ lastSellAt: futureIso }), limits);
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toContain('재진입 쿨다운');
+  });
 });

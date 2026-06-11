@@ -10,7 +10,8 @@ export interface GuardrailContext {
   ordersToday: number;
   lastSellAt: string | null;     // 이 주문 종목의 마지막 매도 시각 (ISO)
   now: Date;
-  totalPositionValue: number;    // 전 종목 보유 평가액 합
+  /** 전 종목 보유 평가액 합 = Σ(quantity × 현재가). 호출자가 정확히 계산해 전달해야 함 — 0을 넣으면 총노출 가드가 무력화된다. */
+  totalPositionValue: number;
 }
 
 export interface GuardrailVerdict {
@@ -34,16 +35,23 @@ export function checkOrder(
     return { allowed: false, reason: `유효하지 않은 수량: ${order.quantity}` };
   }
 
-  if (order.side === 'SELL') return { allowed: true }; // 매도는 항상 허용(손절 경로). 수량 검증은 브로커가 수행. 단, 사이클 주문 수와 수량 유효성 검증은 위에서 이미 적용됨
+  // SELL은 일일상한/재진입 쿨다운에서 면제 — 손절 경로를 항상 열어 두기 위함. maxOrdersPerCycle과 수량 유효성 검증은 위에서 이미 적용됨.
+  if (order.side === 'SELL') return { allowed: true };
 
   if (ctx.ordersToday >= limits.maxOrdersPerDay) {
     return { allowed: false, reason: `일일 최대 주문 수(${limits.maxOrdersPerDay}건) 초과` };
   }
 
   if (ctx.lastSellAt) {
-    const elapsedMin = (ctx.now.getTime() - new Date(ctx.lastSellAt).getTime()) / 60_000;
+    const parsed = new Date(ctx.lastSellAt).getTime();
+    if (!Number.isFinite(parsed)) {
+      // fail-safe: 판정 불가 시 거부 (불확실하면 거래하지 않는다)
+      return { allowed: false, reason: `lastSellAt 값이 유효하지 않음: ${ctx.lastSellAt}` };
+    }
+    // 음수 경과(클럭 스큐/미래 타임스탬프)는 쿨다운 이내로 취급 — 안전한 방향
+    const elapsedMin = (ctx.now.getTime() - parsed) / 60_000;
     if (elapsedMin < limits.reentryCooldownMin) {
-      return { allowed: false, reason: `재진입 쿨다운 — 매도 후 ${limits.reentryCooldownMin}분 경과 전 (${Math.round(elapsedMin)}분 경과)` };
+      return { allowed: false, reason: `재진입 쿨다운 — 매도 후 ${limits.reentryCooldownMin}분 경과 전 (${Math.max(0, Math.round(elapsedMin))}분 경과)` };
     }
   }
 
