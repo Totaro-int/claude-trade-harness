@@ -27,6 +27,7 @@ export class MockAdapter implements BrokerAdapter {
 
   async auth(): Promise<void> {}
 
+  /** volume은 호출마다 PRNG를 소비해 달라진다 — 같은 seed의 서로 다른 인스턴스끼리만 결정론이 성립. */
   async getQuotes(symbols: string[]): Promise<Quote[]> {
     return symbols.filter(s => this.#prices.has(s)).map(s => {
       const price = this.#prices.get(s)!;
@@ -37,6 +38,7 @@ export class MockAdapter implements BrokerAdapter {
   async getBalance(): Promise<Balance> { return { cash: 0, positions: [] }; }
   async isMarketOpen(): Promise<boolean> { return true; }
 
+  /** 일봉 스텝은 ±1%로 advance()의 사이클 스텝(±0.5%)보다 의도적으로 넓다. time은 Date.now() 기준이라 비결정적. */
   async getCandles(symbol: string, _interval: 'day' | 'minute', count: number): Promise<Candle[]> {
     const base = this.#prices.get(symbol) ?? 50_000;
     const out: Candle[] = [];
