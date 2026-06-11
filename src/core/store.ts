@@ -11,7 +11,7 @@ export interface DecisionRow {
   ts: string; action: string; symbol: string | null; name: string | null;
   quantity: number | null; orderType: string | null; limitPrice: number | null;
   reasoning: string; status: string; rejectReason: string | null; marketView: string;
-  thesis?: string | null;
+  thesis: string | null;
 }
 
 export interface SnapshotRow {
@@ -58,8 +58,8 @@ export class Store {
     return (this.#db.prepare(
       'SELECT ts, side, symbol, name, quantity, price, fee, tax FROM trades ORDER BY id DESC LIMIT ?',
     ).all(limit) as Record<string, unknown>[]).map(r => ({
-      ts: r.ts, side: r.side, symbol: r.symbol, name: r.name,
-      quantity: r.quantity, price: r.price, fee: r.fee, tax: r.tax,
+      ts: r['ts'], side: r['side'], symbol: r['symbol'], name: r['name'],
+      quantity: r['quantity'], price: r['price'], fee: r['fee'], tax: r['tax'],
     } as TradeRow));
   }
 
@@ -67,7 +67,7 @@ export class Store {
     this.#db.prepare(
       `INSERT INTO decisions (ts, action, symbol, name, quantity, order_type, limit_price, reasoning, status, reject_reason, market_view, thesis)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(d.ts, d.action, d.symbol, d.name, d.quantity, d.orderType, d.limitPrice, d.reasoning, d.status, d.rejectReason, d.marketView, d.thesis ?? null);
+    ).run(d.ts, d.action, d.symbol, d.name, d.quantity, d.orderType, d.limitPrice, d.reasoning, d.status, d.rejectReason, d.marketView, d.thesis);
   }
 
   getDecisions(limit: number): DecisionRow[] {
@@ -109,8 +109,12 @@ export class Store {
     return row?.value ?? null;
   }
 
-  /** 콜백 안의 모든 기록을 단일 SQLite 트랜잭션으로 묶는다 (체결-상태 원자성). 콜백은 동기여야 한다. */
-  atomic<T>(fn: () => T): T {
+  /**
+   * 콜백 안의 모든 기록을 단일 SQLite 트랜잭션으로 묶는다 (체결-상태 원자성).
+   * - 콜백은 반드시 동기여야 한다 — async 콜백은 타입 에러로 차단된다 (트랜잭션이 await 전에 커밋되는 사고 방지).
+   * - 중첩 호출은 better-sqlite3 savepoint로 동작한다: 내부 atomic이 롤백돼도 외부는 커밋될 수 있다.
+   */
+  atomic<T>(fn: () => T extends Promise<unknown> ? never : T): T extends Promise<unknown> ? never : T {
     return this.#db.transaction(fn)();
   }
 

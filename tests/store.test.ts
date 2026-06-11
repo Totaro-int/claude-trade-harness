@@ -15,8 +15,8 @@ describe('Store', () => {
   });
 
   it('판단 기록 후 최신순 조회', () => {
-    store.recordDecision({ ts: '2026-06-11T09:10:00+09:00', action: 'BUY', symbol: '005930', name: '삼성전자', quantity: 10, orderType: 'MARKET', limitPrice: null, reasoning: '근거1', status: 'FILLED', rejectReason: null, marketView: '강세' });
-    store.recordDecision({ ts: '2026-06-11T09:20:00+09:00', action: 'HOLD', symbol: null, name: null, quantity: null, orderType: null, limitPrice: null, reasoning: '관망', status: 'HOLD', rejectReason: null, marketView: '횡보' });
+    store.recordDecision({ ts: '2026-06-11T09:10:00+09:00', action: 'BUY', symbol: '005930', name: '삼성전자', quantity: 10, orderType: 'MARKET', limitPrice: null, reasoning: '근거1', status: 'FILLED', rejectReason: null, marketView: '강세', thesis: null });
+    store.recordDecision({ ts: '2026-06-11T09:20:00+09:00', action: 'HOLD', symbol: null, name: null, quantity: null, orderType: null, limitPrice: null, reasoning: '관망', status: 'HOLD', rejectReason: null, marketView: '횡보', thesis: null });
     const ds = store.getDecisions(10);
     expect(ds[0].action).toBe('HOLD'); // 최신이 먼저
     expect(ds[1].reasoning).toBe('근거1');
