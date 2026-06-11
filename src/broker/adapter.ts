@@ -52,6 +52,12 @@ export const BalanceSchema = z.object({
   })),
 });
 
+export const OrderResultSchema = z.object({
+  orderId: z.string().min(1),
+  status: z.enum(['ACCEPTED', 'REJECTED']),
+  reason: z.string().optional(),
+});
+
 export const OrderbookSchema = z.object({
   symbol: z.string().min(1),
   bids: z.array(z.object({ price: positiveFinite, quantity: nonNegFinite })),
@@ -67,7 +73,10 @@ export class AdapterContractError extends Error {
 // zod v4: ZodTypeDef is not exported; use ZodType<T> directly and cast the parsed output
 function validate<T>(method: string, schema: z.ZodType<T>, value: unknown): T {
   const r = schema.safeParse(value);
-  if (!r.success) throw new AdapterContractError(method, r.error.message);
+  if (!r.success) {
+    const detail = r.error.issues.map(i => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
+    throw new AdapterContractError(method, detail);
+  }
   return r.data as T;
 }
 
@@ -82,7 +91,11 @@ export function wrapAdapter(a: BrokerAdapter): BrokerAdapter {
   };
   if (a.getCandles) wrapped.getCandles = async (s, i, c) => validate('getCandles', z.array(CandleSchema), await a.getCandles!(s, i, c));
   if (a.getOrderbook) wrapped.getOrderbook = async (s) => validate('getOrderbook', OrderbookSchema, await a.getOrderbook!(s));
-  if (a.submitOrder) wrapped.submitOrder = (o) => a.submitOrder!(o);
+  if (a.submitOrder) wrapped.submitOrder = async (o) => validate('submitOrder', OrderResultSchema, await a.submitOrder!(o));
   if (a.cancelOrder) wrapped.cancelOrder = (id) => a.cancelOrder!(id);
   return wrapped;
 }
+
+// 스키마-타입 드리프트 가드 (컴파일 타임 전용)
+type _QuoteCheck = Quote extends z.infer<typeof QuoteSchema> ? true : never;
+type _BalanceCheck = Balance extends z.infer<typeof BalanceSchema> ? true : never;

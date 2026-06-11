@@ -35,4 +35,15 @@ describe('wrapAdapter', () => {
     const a = wrapAdapter(fake());
     expect(a.getCandles).toBeUndefined();
   });
+
+  it('submitOrder가 규격에 맞지 않는 응답을 반환하면 AdapterContractError', async () => {
+    const a = wrapAdapter(fake({ submitOrder: async () => ({ status: 'ACCEPTED' }) as never }));
+    await expect(a.submitOrder!({ symbol: '005930', name: '삼성전자', side: 'BUY', quantity: 1, orderType: 'MARKET' })).rejects.toThrow(/어댑터 응답이 규격에 맞지 않습니다/);
+  });
+
+  it('bid가 없는 불완전한 quote는 거부', async () => {
+    const { bid: _omit, ...noBid } = goodQuote;
+    const a = wrapAdapter(fake({ getQuotes: async () => [noBid] as never }));
+    await expect(a.getQuotes(['005930'])).rejects.toThrow(/어댑터 응답이 규격에 맞지 않습니다/);
+  });
 });
