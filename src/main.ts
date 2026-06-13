@@ -20,7 +20,7 @@ const ROOT = process.cwd();
 
 function notifyMac(msg: string): void {
   if (process.platform === 'darwin') {
-    execFile('osascript', ['-e', `display notification ${JSON.stringify(msg)} with title "open-trader"`], () => {});
+    execFile('osascript', ['-e', `display notification ${JSON.stringify(msg)} with title "claude-trade-harness"`], () => {});
   }
 }
 
@@ -128,7 +128,7 @@ async function main(): Promise<void> {
   // LIVE 모드 잠금 검사 (v1은 라이브 주문 실행 비지원)
   if (config.mode === 'live') {
     try {
-      assertLiveUnlocked(config.mode, process.env['OPEN_TRADER_LIVE'], store);
+      assertLiveUnlocked(config.mode, process.env['CLAUDE_TRADE_LIVE'], store);
       // 잠금은 통과했지만 v1은 실제 라이브 주문 미구현
       console.error('라이브 주문 연동은 v1 범위 밖 — 페이퍼로 운전하세요');
       process.exit(1);
@@ -172,7 +172,7 @@ async function main(): Promise<void> {
         store.setKV('warning', 'claude CLI 인증 필요 — 터미널에서 claude login 후 재시작');
         // 스트릭 첫 오류에만 알림 발송 (반복 사이클 중복 알림 방지)
         if (consecutiveAuthErrors === 1) {
-          notifyMac('open-trader: claude CLI 인증 필요 — 터미널에서 claude login 후 재시작');
+          notifyMac('claude-trade-harness: claude CLI 인증 필요 — 터미널에서 claude login 후 재시작');
         }
       }
       throw err;

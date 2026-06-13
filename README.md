@@ -1,4 +1,4 @@
-# open-trader
+# claude-trade-harness
 
 **LLM-in-the-loop 트레이딩 하네스 + BYO(Bring-Your-Own) 전략.** 증권사 OpenAPI 문서 URL과 키를 넣으면 Claude가 브로커 어댑터를 자동 생성·검증해 연결하고, 자연어 전략 문서를 두뇌(Claude)에 물려 페이퍼 트레이딩으로 돌리는 로컬 골격입니다.
 
@@ -33,7 +33,7 @@
 
 ## 무엇인가요?
 
-open-trader는 세 가지 단계로 동작합니다.
+claude-trade-harness는 세 가지 단계로 동작합니다.
 
 1. **온보딩** — 증권사 OpenAPI 문서 URL과 API 키를 입력하면, Claude가 해당 API를 분석해 TypeScript 어댑터 코드를 자동 생성합니다. 어댑터는 정적 검사·컴파일·읽기전용 연결 테스트를 모두 통과해야 활성화됩니다. (단, 위 경고대로 주문 경로는 검증 대상이 아닙니다.)
 2. **전략 설정** — 자연어로 작성된 투자 전략 문서(Markdown)를 업로드합니다. 내장 베이스라인을 그대로 쓰지 말고 본인 전략으로 교체하는 것을 권장합니다.
@@ -46,7 +46,7 @@ open-trader는 세 가지 단계로 동작합니다.
 **요구사항:** Node.js 20+, [Claude Code CLI](https://claude.ai/code) 로그인 상태(구독 사용)
 
 ```bash
-git clone <repo> && cd open-trader
+git clone <repo> && cd claude-trade-harness
 npm install
 npm start
 ```
