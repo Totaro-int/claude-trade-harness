@@ -1,0 +1,12 @@
+{
+  "name": "trade-harness",
+  "description": "claude-trade-harness 런처. 온보딩/운영 데몬 시작·중지, 대시보드 상태 조회, 백테스트를 슬래시 커맨드로 제어한다. 매매 엔진 자체는 별도 클론한 하네스 앱에서 백그라운드로 동작하며, 이 플러그인은 그것을 띄우고 들여다보는 얇은 래퍼다.",
+  "version": "0.1.1",
+  "author": {
+    "name": "Totaro"
+  },
+  "homepage": "https://github.com/Totaro-int/claude-trade-harness",
+  "repository": "https://github.com/Totaro-int/claude-trade-harness",
+  "license": "MIT",
+  "keywords": ["trading", "paper-trading", "llm", "harness", "launcher", "toss"]
+}

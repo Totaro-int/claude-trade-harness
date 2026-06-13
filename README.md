@@ -51,7 +51,30 @@ npm install
 npm start
 ```
 
-브라우저가 자동으로 온보딩 페이지를 엽니다.
+브라우저에서 `http://localhost:3000` 온보딩 페이지로 접속합니다.
+
+---
+
+## Claude Code 플러그인 (선택)
+
+터미널에서 `npm start`를 직접 치는 대신, **슬래시 커맨드**로 온보딩·운영·상태조회·백테스트를 제어할 수 있는 얇은 런처 플러그인을 함께 제공합니다 (`plugins/trade-harness`).
+
+```text
+/plugin marketplace add Totaro-int/claude-trade-harness
+/plugin install trade-harness@claude-trade-harness
+```
+
+| 커맨드 | 동작 |
+|--------|------|
+| `/trade-setup` | 첫 온보딩 — 의존성 설치 후 온보딩 서버 시작 |
+| `/trade-start` | 운영 데몬 백그라운드 시작 + 대시보드 |
+| `/trade-status` | 자산·일손익·벤치마크 대비 초과수익·포지션 요약 |
+| `/trade-stop` | 데몬 정상 종료 |
+| `/trade-backtest [막대수]` | 과거 캔들 백테스트 |
+
+플러그인은 하네스 앱을 `$CLAUDE_TRADE_DIR` → 현재 디렉토리 → `~/open-trader` 순으로 자동 탐색합니다. 자세한 내용은 [`plugins/trade-harness/README.md`](./plugins/trade-harness/README.md).
+
+> 플러그인은 **런처일 뿐**이며 매매 엔진은 이 저장소(앱)가 백그라운드 데몬으로 실행합니다.
 
 ---
 
