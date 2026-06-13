@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFileSync, existsSync } from 'node:fs';
 import { extname, resolve } from 'node:path';
 import type { EventEmitter } from 'node:events';
+import { z } from 'zod';
 import type { AppConfig } from '../core/config.js';
 import type { PaperBroker } from '../broker/paper.js';
 import type { Store } from '../core/store.js';
@@ -16,10 +17,28 @@ export interface ServerDeps {
   // operational mode
   store?: Store;
   broker?: PaperBroker;
+  accountNo?: string;   // 라이브 확인용 계좌번호(끝 4자리 비교에만 사용, 직렬화 안 함)
   // setup mode
   orchestrator?: SetupOrchestrator;
   onSetupComplete?: () => void;
 }
+
+// ── POST 본문 검증 스키마 (경계에서 unknown → 검증된 형태로) ──
+const BrokerRegSchema = z.object({
+  brokerId: z.string(), brokerName: z.string(), docsUrls: z.array(z.string()),
+  baseUrl: z.string(), apiKey: z.string(), apiSecret: z.string(), accountNo: z.string(),
+});
+const TestSchema = z.object({ testSymbol: z.string().optional() });
+const StrategyUploadSchema = z.object({ filename: z.string(), content: z.string() });
+const InterviewSchema = z.object({
+  risk: z.string(), capital: z.number(), horizon: z.string(), sectors: z.array(z.string()),
+});
+const FinishSchema = z.object({
+  mode: z.enum(['paper', 'live']),
+  guardrails: z.record(z.string(), z.number()),
+  agreed: z.boolean(),
+});
+const LiveConfirmSchema = z.object({ last4: z.string() });
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -70,7 +89,19 @@ function kstTodayKey(): string {
   return now.toISOString().slice(0, 10); // YYYY-MM-DD
 }
 
-function buildState(deps: ServerDeps) {
+/** adapters/registry.json에서 brokerName을 1회 해석 (없으면 brokerId 폴백). startServer에서 캐시 후 buildState에 전달. */
+function resolveBrokerName(fallback: string): string {
+  const registryPath = resolve('adapters', 'registry.json');
+  if (existsSync(registryPath)) {
+    try {
+      const reg = JSON.parse(readFileSync(registryPath, 'utf-8')) as { brokerName?: string };
+      if (reg.brokerName) return reg.brokerName;
+    } catch { /* parse 실패 — 폴백 */ }
+  }
+  return fallback;
+}
+
+function buildState(deps: ServerDeps, brokerName: string) {
   const { store, broker, config } = deps;
   if (!store || !broker) throw new Error('store/broker 없음 — 운영 모드 전용');
 
@@ -87,18 +118,6 @@ function buildState(deps: ServerDeps) {
   for (const d of decisions) {
     if (d.status === 'ERROR') consecutiveErrors++;
     else break;
-  }
-
-  // brokerName: read from adapters/registry.json if present, else config.brokerId
-  let brokerName: string = config.brokerId;
-  const registryPath = resolve('adapters', 'registry.json');
-  if (existsSync(registryPath)) {
-    try {
-      const reg = JSON.parse(readFileSync(registryPath, 'utf-8')) as { brokerName?: string };
-      if (reg.brokerName) brokerName = reg.brokerName;
-    } catch {
-      // ignore parse error, fall back to brokerId
-    }
   }
 
   // quotes as object map symbol→quote
@@ -189,8 +208,8 @@ function createSetupHandler(deps: ServerDeps, progressClients: Set<ServerRespons
     // POST /api/setup/broker
     if (req.method === 'POST' && pathname === '/api/setup/broker') {
       try {
-        const body = await readJson(req);
-        await orch.registerBroker(body as Parameters<SetupOrchestrator['registerBroker']>[0]);
+        const body = BrokerRegSchema.parse(await readJson(req));
+        await orch.registerBroker(body);
         json(res, 200, { ok: true });
       } catch (err) {
         json(res, 400, { error: (err as Error).message });
@@ -217,7 +236,7 @@ function createSetupHandler(deps: ServerDeps, progressClients: Set<ServerRespons
     // POST /api/setup/test
     if (req.method === 'POST' && pathname === '/api/setup/test') {
       try {
-        const body = await readJson(req) as { testSymbol?: string };
+        const body = TestSchema.parse(await readJson(req));
         const result = await orch.testConnection(body.testSymbol ?? '');
         json(res, 200, result);
       } catch (err) {
@@ -229,8 +248,8 @@ function createSetupHandler(deps: ServerDeps, progressClients: Set<ServerRespons
     // POST /api/setup/strategy/upload
     if (req.method === 'POST' && pathname === '/api/setup/strategy/upload') {
       try {
-        const body = await readJson(req) as { filename?: string; content?: string };
-        await orch.saveStrategyDoc(body.filename ?? '', body.content ?? '');
+        const body = StrategyUploadSchema.parse(await readJson(req));
+        await orch.saveStrategyDoc(body.filename, body.content);
         json(res, 200, { ok: true });
       } catch (err) {
         json(res, 400, { error: (err as Error).message });
@@ -240,9 +259,9 @@ function createSetupHandler(deps: ServerDeps, progressClients: Set<ServerRespons
 
     // POST /api/setup/strategy/interview (async, 202)
     if (req.method === 'POST' && pathname === '/api/setup/strategy/interview') {
-      let profile: Parameters<SetupOrchestrator['generateStrategy']>[0];
+      let profile: z.infer<typeof InterviewSchema>;
       try {
-        profile = await readJson(req) as Parameters<SetupOrchestrator['generateStrategy']>[0];
+        profile = InterviewSchema.parse(await readJson(req));
       } catch (err) {
         json(res, 400, { error: (err as Error).message });
         return true;
@@ -263,7 +282,7 @@ function createSetupHandler(deps: ServerDeps, progressClients: Set<ServerRespons
     // POST /api/setup/finish
     if (req.method === 'POST' && pathname === '/api/setup/finish') {
       try {
-        const body = await readJson(req) as Parameters<SetupOrchestrator['finish']>[0];
+        const body = FinishSchema.parse(await readJson(req));
         await orch.finish(body);
         deps.onSetupComplete?.();
         json(res, 200, { ok: true });
@@ -284,13 +303,15 @@ function createSetupHandler(deps: ServerDeps, progressClients: Set<ServerRespons
 export async function startServer(deps: ServerDeps): Promise<() => void> {
   const sseClients = new Set<ServerResponse>();         // operational /events
   const progressClients = new Set<ServerResponse>();    // setup /api/setup/progress
+  // brokerName은 런타임 중 불변 — 1회 해석해 매 SSE 업데이트마다 파일 읽기 제거
+  const brokerName = deps.setupMode ? '' : resolveBrokerName(deps.config.brokerId);
 
   // Operational SSE push
   const onUpdate = () => {
     if (deps.setupMode) return;
     let payload: string;
     try {
-      payload = `data: ${JSON.stringify(buildState(deps))}\n\n`;
+      payload = `data: ${JSON.stringify(buildState(deps, brokerName))}\n\n`;
     } catch {
       return;
     }
@@ -323,17 +344,17 @@ export async function startServer(deps: ServerDeps): Promise<() => void> {
         // ── Operational mode routing ──
 
         if (pathname === '/api/state') {
-          json(res, 200, buildState(deps));
+          json(res, 200, buildState(deps, brokerName));
           return;
         }
 
         if (pathname === '/api/live/confirm') {
           if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
           try {
-            const body = await readJson(req) as { last4?: string };
-            const expected = process.env['BROKER_ACCOUNT_NO']?.slice(-4);
-            const last4 = body.last4;
-            if (!expected || expected.length !== 4 || last4 !== expected) {
+            const body = LiveConfirmSchema.parse(await readJson(req));
+            // 로드된 .env의 계좌번호(deps.accountNo) 우선, 없으면 process.env 폴백
+            const expected = (deps.accountNo || process.env['BROKER_ACCOUNT_NO'])?.slice(-4);
+            if (!expected || expected.length !== 4 || body.last4 !== expected) {
               json(res, 400, { error: '계좌 확인 실패' });
               return;
             }

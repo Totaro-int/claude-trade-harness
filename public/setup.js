@@ -5,7 +5,11 @@ const show = (id) => {
   const order = ['step-broker', 'step-generate', 'step-test', 'step-strategy', 'step-finish'];
   document.querySelectorAll('#steps .dot').forEach((d, i) => d.classList.toggle('on', i <= order.indexOf(id)));
 };
-const appendLog = (el, msg) => { el.textContent += msg + '\n'; el.scrollTop = el.scrollHeight; };
+const appendLog = (el, msg) => {
+  const lines = (el.textContent + msg + '\n').split('\n');
+  el.textContent = lines.slice(-200).join('\n'); // 마지막 200줄만 유지 (메모리 폭증 방지)
+  el.scrollTop = el.scrollHeight;
+};
 
 async function post(path, body) {
   const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -23,12 +27,14 @@ $('btn-broker').onclick = async () => {
       apiKey: $('apiKey').value, apiSecret: $('apiSecret').value, accountNo: $('accountNo').value.trim(),
     });
     show('step-generate');
+    let genDone = false;
     const es = new EventSource('/api/setup/progress');
     es.onmessage = (e) => {
       const d = JSON.parse(e.data);
       appendLog($('gen-log'), d.message);
-      if (d.done) { es.close(); d.ok ? show('step-test') : appendLog($('gen-log'), '❌ 생성 실패 — 문서 URL을 확인하고 새로고침 후 재시도하세요.'); }
+      if (d.done) { genDone = true; es.close(); d.ok ? show('step-test') : appendLog($('gen-log'), '❌ 생성 실패 — 문서 URL을 확인하고 새로고침 후 재시도하세요.'); }
     };
+    es.onerror = () => { if (!genDone) appendLog($('gen-log'), '⚠️ 진행 상황 연결 끊김 — 재연결 시도 중…'); };
     await post('/api/setup/generate', {});
   } catch (err) {
     alert('등록 실패: ' + err.message);
@@ -55,11 +61,13 @@ $('btn-strategy-gen').onclick = async () => {
   $('strategy-log').hidden = false;
   appendLog($('strategy-log'), 'Claude가 전략을 작성 중...');
   try {
+    let stratDone = false;
     const es = new EventSource('/api/setup/progress');
     es.onmessage = (e) => {
       const d = JSON.parse(e.data);
       appendLog($('strategy-log'), d.message);
       if (d.done) {
+        stratDone = true;
         es.close();
         if (d.ok) {
           show('step-finish');
@@ -69,6 +77,7 @@ $('btn-strategy-gen').onclick = async () => {
         }
       }
     };
+    es.onerror = () => { if (!stratDone) appendLog($('strategy-log'), '⚠️ 진행 상황 연결 끊김 — 재연결 시도 중…'); };
     await post('/api/setup/strategy/interview', {
       risk: $('risk').value, capital: 10000000, horizon: $('horizon').value,
       sectors: $('sectors').value.split(',').map(s => s.trim()).filter(Boolean),
@@ -111,4 +120,4 @@ fetch('/api/setup/status').then(r => r.json()).then(s => {
   if (s.step === 'strategy') show('step-strategy');
   else if (s.step === 'finish') show('step-finish');
   else if (s.step === 'generate' || s.step === 'test') show('step-test');
-});
+}).catch(() => { /* 서버 미응답 — 1단계(broker) 유지 */ });

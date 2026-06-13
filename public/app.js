@@ -98,4 +98,11 @@ async function load() {
 }
 load();
 const es = new EventSource('/events');
-es.onmessage = (e) => { try { render(JSON.parse(e.data)); } catch { /* 무시 */ } };
+es.onmessage = (e) => {
+  try { render(JSON.parse(e.data)); } catch { /* 무시 */ }
+  const b = $('warn-banner'); if (b) b.hidden = true; // 재연결 성공 시 배너 해제
+};
+es.onerror = () => {
+  // 연결 끊김 — EventSource는 자동 재연결하지만 사용자에게 표시
+  const b = $('warn-banner'); if (b) { b.hidden = false; $('warn-text').textContent = '실시간 연결 끊김 — 재연결 시도 중…'; }
+};

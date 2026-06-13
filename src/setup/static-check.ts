@@ -2,12 +2,16 @@
 const BANNED: Array<[RegExp, string]> = [
   [/\brequire\b/, 'require 참조 금지'],
   [/\bimport[\s\S]{0,40}\(/, '동적 import 금지 (주석/공백 우회 포함)'],
+  [/\bimport\s*\/[*/]/, '동적 import (주석 직결 우회) 금지'], // import/*..*/( · import//\n( — 고정상한 우회 차단
   [/^\s*import\s+(?!type\b)/m, 'import type 외의 import 금지 (런타임 기능은 주입된 http만 사용)'],
   [/\beval\b/, 'eval 참조 금지 (간접 호출 포함)'],
   [/new\s+Function/, 'new Function 금지'],
   [/\.constructor\s*\(/, 'constructor() 호출 금지 (Function 생성자 우회)'],
   [/getPrototypeOf/, 'getPrototypeOf 금지 (프로토타입 체인 우회)'],
   [/\bprototype\b/, 'prototype 접근 금지 (프로토타입 오염 차단)'],
+  [/\[\s*['"`](?:__proto__|prototype|constructor)['"`]/, '프로토타입/생성자 문자열 키 접근 금지'],
+  [/\b(?:Object|constructor)\s*\[/, 'Object/constructor 동적 속성 접근 금지 (문자열 결합 우회 차단)'],
+  [/__define[GS]etter__|__lookup[GS]etter__/, '레거시 프로토타입 접근자 금지'],
   [/__proto__/, '__proto__ 접근 금지'],
   [/\bSymbol\s*[.[]/, 'Symbol 접근 금지'],
   [/\bReflect\b/, 'Reflect 접근 금지'],

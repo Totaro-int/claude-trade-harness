@@ -1,4 +1,4 @@
-import type { FillResult, OrderRequest, Position, Quote, Thesis } from '../core/types.js';
+import type { FillResult, FilledResult, OrderRequest, Position, Quote, Thesis } from '../core/types.js';
 
 export interface PendingOrder extends OrderRequest {
   id: number;
@@ -55,8 +55,8 @@ export class PaperBroker {
    * - 체결가: 지정가(order.limitPrice)
    * - 체결 실패(현금 부족 등) 시 해당 주문은 큐에 유지됨 (소실 금지)
    */
-  onTick(quotes: Map<string, Quote>): Array<{ order: PendingOrder; result: FillResult }> {
-    const fills: Array<{ order: PendingOrder; result: FillResult }> = [];
+  onTick(quotes: Map<string, Quote>): Array<{ order: PendingOrder; result: FilledResult }> {
+    const fills: Array<{ order: PendingOrder; result: FilledResult }> = [];
     this.#pending = this.#pending.filter(order => {
       const q = quotes.get(order.symbol);
       if (!q) return true;
@@ -89,7 +89,9 @@ export class PaperBroker {
   /** bid==ask(스프레드 정보 없음)이면 현실적 half-spread를 적용한 체결가 산출 */
   #execPrice(side: 'BUY' | 'SELL', q: Quote): number {
     if (q.bid !== q.ask) return side === 'BUY' ? q.ask : q.bid;
-    const spread = Math.round(q.price * this.#rates.halfSpreadPct);
+    // 저가주에서 반올림이 0이 되어 슬리피지가 사라지는 것 방지: halfSpreadPct>0이면 최소 1원
+    const raw = q.price * this.#rates.halfSpreadPct;
+    const spread = raw > 0 ? Math.max(1, Math.round(raw)) : 0;
     return side === 'BUY' ? q.price + spread : q.price - spread;
   }
 
