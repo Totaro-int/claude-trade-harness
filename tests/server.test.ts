@@ -30,6 +30,7 @@ const BASE_CONFIG: AppConfig = {
   taxRate: 0.0018,
   halfSpreadPct: 0.0005,
   cycleMinutes: 30,
+  requireIndicators: true,
   guardrails: {
     maxPositionPct: 20,
     maxOrderPct: 10,

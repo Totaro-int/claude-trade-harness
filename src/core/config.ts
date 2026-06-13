@@ -18,6 +18,9 @@ export interface AppConfig {
   taxRate: number;
   halfSpreadPct: number;        // bid==ask 폴백 시 적용할 half-spread (소수, 0.0005 = 0.05%)
   cycleMinutes: number;
+  // 지표(getCandles) 데이터가 없으면 매매를 건너뛴다. lastPrice-only 매매는 검증된 우위가 없고
+  // 수수료만 까먹는 노이즈 트레이딩이므로 기본 차단(true).
+  requireIndicators: boolean;
   guardrails: GuardrailLimits;
   claudeCmd: string;
   dbPath: string;
@@ -32,6 +35,7 @@ const DEFAULTS: AppConfig = {
   taxRate: 0.0018,
   halfSpreadPct: 0.0005,
   cycleMinutes: 30,
+  requireIndicators: true,
   guardrails: {
     maxPositionPct: 20,
     maxOrderPct: 10,

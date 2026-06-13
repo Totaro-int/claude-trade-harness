@@ -84,6 +84,20 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
   const ordersTodayKey = `ordersToday:${today}`;
   let ordersToday = Number(store.getKV(ordersTodayKey) ?? '0');
 
+  // 지표 필수 fail-safe — lastPrice-only 매매는 검증된 우위가 없고 수수료만 까먹으므로 기본 차단(requireIndicators=true).
+  // 지표가 비면 두뇌 호출·주문 제출을 모두 건너뛰고 SKIPPED 행만 남긴다.
+  // finishCycle은 그대로 호출해 스냅샷/벤치마크/onTick 체결은 유지한다.
+  if (config.requireIndicators && indicators.length === 0) {
+    const skipRow: DecisionRow = {
+      ts: nowISO(), action: 'HOLD', symbol: null, name: null, quantity: null, orderType: null,
+      limitPrice: null,
+      reasoning: '지표 데이터 없음 — requireIndicators=true이므로 매매를 건너뜁니다. 어댑터가 getCandles를 구현하거나 config requireIndicators=false로 변경하세요.',
+      status: 'SKIPPED', rejectReason: null, marketView: '', thesis: null,
+    };
+    finishCycle(deps, quotes, dailyPnlPct, tickTrades, [skipRow], ordersToday, ordersTodayKey, sellTimesFrom(tickTrades));
+    return { skipped: true, reason: 'no-indicators' };
+  }
+
   // 5) 두뇌
   let output: BrainOutput;
   try {

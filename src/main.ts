@@ -94,6 +94,8 @@ async function main(): Promise<void> {
 
   // 어댑터 로드
   let adapter: import('./broker/adapter.js').BrokerAdapter & { advance?: () => void };
+  // 캐치된 에러 메시지에서 마스킹할 시크릿 (cycle.ts가 에러 경로에서 스크럽). mock은 시크릿 없음 → [].
+  let secrets: string[] = [];
   if (config.brokerId === 'mock') {
     adapter = new MockAdapter(universe);
   } else {
@@ -112,12 +114,14 @@ async function main(): Promise<void> {
       console.warn('adapters/registry.json을 읽을 수 없습니다 — 온보딩을 다시 실행하세요');
     }
     const adapterPath = resolve(ROOT, 'adapters', config.brokerId, 'adapter.ts');
-    adapter = await loadAdapter(adapterPath, {
+    const adapterEnv = {
       apiKey: env['BROKER_API_KEY'] ?? '',
       apiSecret: env['BROKER_API_SECRET'] ?? '',
       accountNo: env['BROKER_ACCOUNT_NO'] ?? '',
       baseUrl,
-    });
+    };
+    secrets = [adapterEnv.apiKey, adapterEnv.apiSecret, adapterEnv.accountNo].filter(s => s.length >= 6);
+    adapter = await loadAdapter(adapterPath, adapterEnv);
     await adapter.auth();
   }
 
@@ -189,6 +193,7 @@ async function main(): Promise<void> {
         strategyDocs,
         brain,
         events,
+        secrets,
       }),
     onMarketClose: () => {
       broker.cancelAllPending();
