@@ -6,3 +6,6 @@ strategy/
 .superpowers/
 test-results/
 playwright-report/
+
+# 플러그인 런처가 만드는 데몬 PID
+.trade-daemon.pid
