@@ -7,14 +7,32 @@ import { loadAdapter } from '../broker/loader.js';
 import { runConnectionTest, type ConnResult } from './connection-test.js';
 import type { AdapterEnv } from '../broker/adapter.js';
 
+/** IPv4-mapped IPv6 (::ffff:a.b.c.d 또는 ::ffff:aabb:ccdd)를 점10진수 IPv4로 펼친다. 아니면 원본 반환. */
+function expandIPv4Mapped(host: string): string {
+  const dotted = host.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i);
+  if (dotted) return dotted[1]!;
+  const hex = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+  if (hex) {
+    const hi = parseInt(hex[1]!, 16);
+    const lo = parseInt(hex[2]!, 16);
+    return [(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff].join('.');
+  }
+  return host;
+}
+
 export function validateDocsUrl(url: string): void {
   let parsed: URL;
   try { parsed = new URL(url); } catch { throw new Error(`유효하지 않은 문서 URL: ${url}`); }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(`http/https 문서 URL만 허용됩니다: ${url}`);
   }
-  const host = parsed.hostname.replace(/^\[|\]$/g, ''); // strip IPv6 brackets
-  // 루프백/링크로컬/사설 메타데이터 주소 차단 (SSRF)
+  const raw = parsed.hostname.replace(/^\[|\]$/g, '');     // strip IPv6 brackets
+  const host = expandIPv4Mapped(raw);                       // ::ffff:a.b.c.d → a.b.c.d (IMDS 우회 차단)
+  // 클라우드 메타데이터/내부 호스트명 차단 (SSRF)
+  if (host === 'metadata.google.internal' || host === 'metadata.goog' || /\.internal$/i.test(host)) {
+    throw new Error(`내부/메타데이터 호스트로의 문서 fetch는 차단됩니다: ${host}`);
+  }
+  // 루프백/링크로컬/사설 주소 차단 (SSRF)
   if (
     host === 'localhost' || host === '0.0.0.0' || host === '::1' ||
     /^127\./.test(host) || /^169\.254\./.test(host) ||

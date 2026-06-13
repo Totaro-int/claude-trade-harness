@@ -1,6 +1,18 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { PaperBroker } from '../src/broker/paper.js';
-import type { Quote } from '../src/core/types.js';
+import type { FillResult, FilledResult, Quote } from '../src/core/types.js';
+
+// 판별 유니온 좁히기 헬퍼 — status 단언 + 타입 narrowing 동시 수행
+function filled(r: FillResult): FilledResult {
+  expect(r.status).toBe('FILLED');
+  if (r.status !== 'FILLED') throw new Error(`expected FILLED, got ${r.status}`);
+  return r;
+}
+function rejected(r: FillResult): Extract<FillResult, { status: 'REJECTED' }> {
+  expect(r.status).toBe('REJECTED');
+  if (r.status !== 'REJECTED') throw new Error(`expected REJECTED, got ${r.status}`);
+  return r;
+}
 
 function quote(symbol: string, price: number): Quote {
   return {
@@ -25,9 +37,9 @@ describe('PaperBroker 시장가', () => {
     );
     const ask = 70_070; // 70000 * 1.001
     const fee = Math.round(ask * 10 * 0.00015);
-    expect(r.status).toBe('FILLED');
-    expect(r.fillPrice).toBe(ask);
-    expect(r.fee).toBe(fee);
+    const f = filled(r);
+    expect(f.fillPrice).toBe(ask);
+    expect(f.fee).toBe(fee);
     expect(broker.cash).toBe(1_000_000 - ask * 10 - fee);
     expect(broker.positions).toEqual([
       expect.objectContaining({ symbol: '005930', name: '삼성전자', quantity: 10, avgPrice: ask }),
@@ -39,8 +51,7 @@ describe('PaperBroker 시장가', () => {
       { side: 'BUY', symbol: '005930', name: '삼성전자', quantity: 100, orderType: 'MARKET' },
       quotes,
     );
-    expect(r.status).toBe('REJECTED');
-    expect(r.reason).toContain('현금 부족');
+    expect(rejected(r).reason).toContain('현금 부족');
     expect(broker.cash).toBe(1_000_000);
   });
 
@@ -55,8 +66,7 @@ describe('PaperBroker 시장가', () => {
     const proceeds = bid * 4;
     const fee = Math.round(proceeds * 0.00015);
     const tax = Math.round(proceeds * 0.0018);
-    expect(r.status).toBe('FILLED');
-    expect(r.tax).toBe(tax);
+    expect(filled(r).tax).toBe(tax);
     expect(broker.cash).toBe(cashAfterBuy + proceeds - fee - tax);
     expect(broker.positions[0].quantity).toBe(6);
   });
@@ -111,8 +121,7 @@ describe('PaperBroker 지정가', () => {
       { side: 'BUY', symbol: '005930', name: '삼성전자', quantity: 5, orderType: 'LIMIT', limitPrice: 71_000 },
       quotes,
     );
-    expect(r.status).toBe('FILLED');
-    expect(r.fillPrice).toBe(70_070); // ask
+    expect(filled(r).fillPrice).toBe(70_070); // ask
   });
 
   it('onTick에서 가격 도달 시 지정가로 체결', () => {
@@ -192,14 +201,14 @@ describe('half-spread & thesis', () => {
   it('bid==ask이면 MARKET 매수는 price*(1+half)로 체결', () => {
     const b = mkBroker();
     const r = b.submit({ side: 'BUY', symbol: 'A', name: 'A', quantity: 1, orderType: 'MARKET' }, new Map([['A', q()]]));
-    expect(r.fillPrice).toBe(100100); // 100000 * 1.001
+    expect(filled(r).fillPrice).toBe(100100); // 100000 * 1.001
   });
 
   it('bid!=ask이면 기존처럼 호가로 체결', () => {
     const b = mkBroker();
     const r = b.submit({ side: 'BUY', symbol: 'A', name: 'A', quantity: 1, orderType: 'MARKET' },
       new Map([['A', q({ bid: 99900, ask: 100200 })]]));
-    expect(r.fillPrice).toBe(100200);
+    expect(filled(r).fillPrice).toBe(100200);
   });
 
   it('setThesis로 포지션에 thesis 저장, toJSON/fromJSON 왕복 보존', () => {
@@ -216,7 +225,22 @@ describe('half-spread & thesis', () => {
     b.submit({ side: 'BUY', symbol: 'A', name: 'A', quantity: 1, orderType: 'MARKET' }, new Map([['A', q()]]));
     // 매도: bid==ask, price=100000 → spread=Math.round(100000*0.001)=100 → fillPrice=99900
     const r = b.submit({ side: 'SELL', symbol: 'A', name: 'A', quantity: 1, orderType: 'MARKET' }, new Map([['A', q()]]));
-    expect(r.fillPrice).toBe(99900);
+    expect(filled(r).fillPrice).toBe(99900);
+  });
+
+  it('저가주(반올림 0)에서도 half-spread 최소 1원 적용 — 무료 체결 방지', () => {
+    const b = new PaperBroker({ initialCash: 1_000_000, feeRate: 0, taxRate: 0, halfSpreadPct: 0.0005 });
+    // price=999 → 999*0.0005=0.4995 → Math.round=0 이었으나 최소 1원 보장
+    const r = b.submit({ side: 'BUY', symbol: 'A', name: 'A', quantity: 1, orderType: 'MARKET' },
+      new Map([['A', { symbol: 'A', name: 'A', price: 999, bid: 999, ask: 999, changeRate: 0, volume: 0 }]]));
+    expect(filled(r).fillPrice).toBe(1000); // 999 + max(1, round(0.4995))
+  });
+
+  it('halfSpreadPct=0이면 스프레드 없음 (min-1 미적용)', () => {
+    const b = new PaperBroker({ initialCash: 1_000_000, feeRate: 0, taxRate: 0, halfSpreadPct: 0 });
+    const r = b.submit({ side: 'BUY', symbol: 'A', name: 'A', quantity: 1, orderType: 'MARKET' },
+      new Map([['A', { symbol: 'A', name: 'A', price: 999, bid: 999, ask: 999, changeRate: 0, volume: 0 }]]));
+    expect(filled(r).fillPrice).toBe(999);
   });
 
   it('존재하지 않는 심볼에 setThesis하면 false 반환', () => {

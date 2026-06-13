@@ -76,7 +76,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
   const tickFills = broker.onTick(quotes);
   const tickTrades: TradeRow[] = tickFills.map(({ order, result }) => ({
     ts: nowISO(), side: order.side, symbol: order.symbol, name: order.name,
-    quantity: order.quantity, price: result.fillPrice!, fee: result.fee!, tax: result.tax!,
+    quantity: order.quantity, price: result.fillPrice, fee: result.fee, tax: result.tax,
   }));
 
   const equity = broker.equity(quotes);
@@ -119,6 +119,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
   const decisionRows: DecisionRow[] = [];
   const sellTimes: Array<[string, string]> = sellTimesFrom(tickTrades);
   const pendingTheses: Array<[string, string]> = [];
+  const clearThesisKeys: string[] = []; // 직접 체결된 매수가 덮어쓴 stale pendingThesis 키 정리용
   let ordersThisCycle = 0;
 
   for (const decision of output.decisions) {
@@ -135,7 +136,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
       totalPositionValue: broker.positions.reduce((s, p) => s + (quotes.get(p.symbol)?.price ?? p.avgPrice) * p.quantity, 0),
     }, config.guardrails);
     if (!verdict.allowed) {
-      decisionRows.push(toRow(decision, output.marketView, 'REJECTED', verdict.reason!, order.name));
+      decisionRows.push(toRow(decision, output.marketView, 'REJECTED', verdict.reason ?? '가드레일 거부', order.name));
       continue;
     }
 
@@ -144,8 +145,12 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
     if (result.status === 'FILLED') {
       ordersThisCycle++; ordersToday++;
       trades.push({ ts: nowISO(), side: order.side, symbol: order.symbol, name: order.name,
-        quantity: order.quantity, price: result.fillPrice!, fee: result.fee!, tax: result.tax! });
-      if (decision.action === 'BUY' && decision.thesis) broker.setThesis(order.symbol, decision.thesis);
+        quantity: order.quantity, price: result.fillPrice, fee: result.fee, tax: result.tax });
+      if (decision.action === 'BUY' && decision.thesis) {
+        broker.setThesis(order.symbol, decision.thesis);
+        // 직접 체결로 thesis를 새로 지정 → 이전 사이클의 미체결 지정가가 남긴 stale 키 제거
+        clearThesisKeys.push(`pendingThesis:${order.symbol}`);
+      }
       if (decision.action === 'SELL') sellTimes.push([order.symbol, nowISO()]);
       decisionRows.push(toRow(decision, output.marketView, 'FILLED', null, order.name));
     } else if (result.status === 'PENDING') {
@@ -157,7 +162,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
       }
       decisionRows.push(toRow(decision, output.marketView, 'PENDING', null, order.name));
     } else {
-      decisionRows.push(toRow(decision, output.marketView, 'REJECTED', result.reason!, order.name));
+      decisionRows.push(toRow(decision, output.marketView, 'REJECTED', result.reason, order.name));
     }
   }
 
@@ -179,7 +184,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
     }
   }
 
-  finishCycle(deps, quotes, dailyPnlPct, trades, decisionRows, ordersToday, ordersTodayKey, sellTimes, pendingTheses);
+  finishCycle(deps, quotes, dailyPnlPct, trades, decisionRows, ordersToday, ordersTodayKey, sellTimes, pendingTheses, clearThesisKeys);
   return { skipped: false };
 }
 
@@ -253,6 +258,7 @@ function finishCycle(
   trades: TradeRow[], decisionRows: DecisionRow[],
   ordersToday: number, ordersTodayKey: string, sellTimes: Array<[string, string]>,
   pendingTheses: Array<[string, string]> = [],
+  clearThesisKeys: string[] = [],
 ): void {
   const { broker, store, universe, config } = deps;
   const equity = broker.equity(quotes);
@@ -268,6 +274,7 @@ function finishCycle(
     for (const [sym, ts] of sellTimes) store.setKV(`lastSell:${sym}`, ts);
     if (newBaseline) store.setKV('benchmarkBaseline', JSON.stringify(newBaseline));
     for (const [key, val] of pendingTheses) store.setKV(key, val);
+    for (const key of clearThesisKeys) store.deleteKV(key);
   });
   deps.events?.emit('update');
 }

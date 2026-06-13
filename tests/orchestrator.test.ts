@@ -98,6 +98,12 @@ describe('SetupOrchestrator', () => {
     ['http://172.16.0.1/'],
     ['http://[::1]/'],
     ['ftp://example.com/docs'],
+    ['http://[::ffff:169.254.169.254]/latest/meta-data/'], // IPv4-mapped IPv6 → IMDS
+    ['http://[::ffff:127.0.0.1]/'],
+    ['http://[::ffff:10.0.0.1]/'],
+    ['http://[::ffff:192.168.1.1]/'],
+    ['http://metadata.google.internal/computeMetadata/v1/'], // GCP 메타데이터 호스트명
+    ['http://foo.internal/'],
   ])('validateDocsUrl("%s") → 차단/허용 오류', (badUrl) => {
     expect(() => validateDocsUrl(badUrl)).toThrow(/차단|허용/);
   });

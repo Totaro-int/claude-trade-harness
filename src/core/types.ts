@@ -47,13 +47,12 @@ export interface OrderRequest {
   limitPrice?: number;
 }
 
-export interface FillResult {
-  status: 'FILLED' | 'PENDING' | 'REJECTED';
-  reason?: string;
-  fillPrice?: number;
-  fee?: number;
-  tax?: number;
-}
+export type FillResult =
+  | { status: 'FILLED'; fillPrice: number; fee: number; tax: number }
+  | { status: 'PENDING' }
+  | { status: 'REJECTED'; reason: string };
+
+export type FilledResult = Extract<FillResult, { status: 'FILLED' }>;
 
 export interface OrderResult { orderId: string; status: 'ACCEPTED' | 'REJECTED'; reason?: string }
 

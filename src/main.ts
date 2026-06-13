@@ -38,7 +38,7 @@ async function main(): Promise<void> {
       setupMode: true,
       orchestrator,
       onSetupComplete: () => {
-        console.log('온보딩 완료 — 재시작하세요');
+        console.error('온보딩 완료 — 재시작하세요');
         setTimeout(() => process.exit(0), 500);
       },
     });
@@ -96,6 +96,7 @@ async function main(): Promise<void> {
   let adapter: import('./broker/adapter.js').BrokerAdapter & { advance?: () => void };
   // 캐치된 에러 메시지에서 마스킹할 시크릿 (cycle.ts가 에러 경로에서 스크럽). mock은 시크릿 없음 → [].
   let secrets: string[] = [];
+  let accountNo = '';   // 라이브 확인용 (서버로 전달, 끝 4자리 비교에만 사용)
   if (config.brokerId === 'mock') {
     adapter = new MockAdapter(universe);
   } else {
@@ -121,6 +122,7 @@ async function main(): Promise<void> {
       baseUrl,
     };
     secrets = [adapterEnv.apiKey, adapterEnv.apiSecret, adapterEnv.accountNo].filter(s => s.length >= 6);
+    accountNo = adapterEnv.accountNo;
     adapter = await loadAdapter(adapterPath, adapterEnv);
     await adapter.auth();
   }
@@ -209,6 +211,7 @@ async function main(): Promise<void> {
     setupMode: false,
     store,
     broker,
+    accountNo,
   });
 
   // 종료 처리
