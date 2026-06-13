@@ -20,7 +20,7 @@ export function validateDocsUrl(url: string): void {
     /^127\./.test(host) || /^169\.254\./.test(host) ||
     /^10\./.test(host) || /^192\.168\./.test(host) ||
     /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
-    /^(fc|fd)[0-9a-f]{2}:/i.test(host) || host === '::'
+    /^(fc|fd)[0-9a-f]{2}:/i.test(host) || /^fe[89ab][0-9a-f]:/i.test(host) || host === '::'
   ) {
     throw new Error(`내부/사설 주소로의 문서 fetch는 차단됩니다: ${host}`);
   }
