@@ -24,10 +24,17 @@ describe('checkAdapterSource', () => {
     ['child_process', `import { exec } from 'child_process';`],
     ['값 import', `import { z } from 'zod';`],
     ['동적 import', `const m = await import('node:fs');`],
+    ['주석 우회 동적 import', `const x = import /* bypass */ ('node:process');`],
+    ['개행 우회 동적 import', `const x = import\n('node:fs');`],
+    ['공백 우회 동적 import', `const x = import(  'node:fs');`],
     ['eval', `eval('1+1');`],
     ['직접 fetch', `await fetch('https://evil.com');`],
     ['process 접근', `const k = process.env.SECRET;`],
     ['require', `const fs = require('fs');`],
+    ['prototype 오염', `Object.prototype.toJSON = () => env.apiKey;`],
+    ['__proto__ 접근', `const p = s.__proto__;`],
+    ['Symbol 접근', `String.prototype[Symbol.toPrimitive] = () => env.apiSecret;`],
+    ['Reflect 접근', `Reflect.get(env, 'apiKey');`],
   ])('%s 차단', (_label, snippet) => {
     expect(checkAdapterSource(ok + '\n' + snippet, SECRETS).length).toBeGreaterThan(0);
   });
