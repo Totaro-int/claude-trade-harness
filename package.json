@@ -1,6 +1,6 @@
 {
   "name": "claude-trade-harness",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Universal AI auto-trading harness — bring your broker's OpenAPI docs, Claude builds the adapter",
   "private": true,
   "type": "module",
