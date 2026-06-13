@@ -1,8 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadAdapter } from '../src/broker/loader.js';
+import { loadAdapter, snapshotPrototypes, assertNoPrototypePollution } from '../src/broker/loader.js';
 import { runConnectionTest } from '../src/setup/connection-test.js';
 
 const GOOD = `
@@ -61,6 +61,26 @@ export function createAdapter(env, http) {
 }`;
     await expect(loadAdapter(writeTmpAdapter(BANNED), env))
       .rejects.toThrow(/정적 검사 위반/);
+  });
+
+  // 런타임 프로토타입 오염 감사 (방어 심층화).
+  // 참고: 디스크 어댑터를 loadAdapter로 통과시키면 'prototype' 토큰을 static-check가 먼저
+  // 잡아내므로, 모듈 평가 시점 오염을 잡는 RUNTIME 감사 로직 자체를 헬퍼 단위로 검증한다.
+  describe('assertNoPrototypePollution (런타임 감사)', () => {
+    afterEach(() => {
+      delete (Object.prototype as Record<string, unknown>).x;
+    });
+
+    it('오염 없으면 통과', () => {
+      const before = snapshotPrototypes();
+      expect(() => assertNoPrototypePollution(before)).not.toThrow();
+    });
+
+    it('Object.prototype 오염 시 throw', () => {
+      const before = snapshotPrototypes();
+      (Object.prototype as Record<string, unknown>).x = 1;
+      expect(() => assertNoPrototypePollution(before)).toThrow(/프로토타입 오염/);
+    });
   });
 
   it('연결 테스트: 시크릿이 에러 메시지에 노출되면 마스킹됨', async () => {

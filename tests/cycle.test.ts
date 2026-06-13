@@ -16,6 +16,7 @@ const universe = [
 function makeDeps(opts: {
   brain: (prompt: string) => Promise<BrainOutput>;
   presetPosition?: { symbol: string; quantity: number; avgPrice: number };
+  secrets?: string[];
 }): { deps: CycleDeps; broker: PaperBroker; store: Store } {
   const config = loadConfig('/nonexistent');
   const broker = new PaperBroker({
@@ -47,6 +48,7 @@ function makeDeps(opts: {
     strategyDocs: '테스트 전략',
     brain: opts.brain,
     events: new EventEmitter(),
+    secrets: opts.secrets,
   };
   return { deps, broker, store };
 }
@@ -252,6 +254,58 @@ describe('신규 사이클 동작', () => {
     expect(broker.positions).toHaveLength(1);
     expect(broker.positions[0]!.thesis?.why).toBe('저점 매수');
     expect(store.getKV(`pendingThesis:${SYM}`)).toBeNull();
+  });
+
+  it('시세 조회 실패 시 에러 메시지의 시크릿이 [REDACTED]로 마스킹된다', async () => {
+    const { deps, store } = makeDeps({
+      brain: async () => ({ marketView: '', decisions: [] }),
+      secrets: ['supersecretkey123'],
+    });
+    deps.adapter.getQuotes = async () => {
+      throw new Error('HTTP 401: token=supersecretkey123 invalid');
+    };
+    await runCycle(deps);
+    const d = store.getDecisions(10)[0];
+    expect(d.status).toBe('ERROR');
+    expect(d.reasoning).toContain('[REDACTED]');
+    expect(d.reasoning).not.toContain('supersecretkey123');
+  });
+
+  it('requireIndicators=true + getCandles 미구현 어댑터 → SKIPPED, 두뇌 미호출', async () => {
+    let brainCalled = false;
+    const { deps, store, broker } = makeDeps({
+      brain: async () => { brainCalled = true; return { marketView: 'm', decisions: [{ action: 'HOLD', reasoning: 'r' }] }; },
+    });
+    // getCandles 미구현 어댑터로 교체 → collectIndicators가 [] 반환
+    (deps.adapter as { getCandles?: unknown }).getCandles = undefined;
+    const result = await runCycle(deps);
+    expect(result.skipped).toBe(true);
+    expect(result.reason).toBe('no-indicators');
+    expect(brainCalled).toBe(false);
+    expect(broker.positions).toHaveLength(0);
+    expect(store.getTrades(10)).toHaveLength(0);
+    const d = store.getDecisions(10)[0];
+    expect(d.status).toBe('SKIPPED');
+    expect(d.reasoning).toContain('지표 데이터 없음');
+    // finishCycle은 실행되어 스냅샷은 남는다
+    expect(store.getSnapshots(10)).toHaveLength(1);
+  });
+
+  it('requireIndicators=false면 getCandles 미구현 어댑터도 매매한다', async () => {
+    const { deps, broker } = makeDeps({
+      brain: async () => ({
+        marketView: 'm',
+        decisions: [{
+          action: 'BUY', symbol: SYM, quantity: 1, orderType: 'MARKET', reasoning: 'r',
+          thesis: { why: 'w', target: '+5%', stop: '-2%', exitCondition: 'x' },
+        }],
+      }),
+    });
+    deps.config = { ...deps.config, requireIndicators: false };
+    (deps.adapter as { getCandles?: unknown }).getCandles = undefined;
+    const result = await runCycle(deps);
+    expect(result.skipped).toBe(false);
+    expect(broker.positions).toHaveLength(1);
   });
 
   it('ordersToday KV가 체결마다 증가한다', async () => {

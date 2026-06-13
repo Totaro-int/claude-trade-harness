@@ -16,6 +16,8 @@ export interface CycleDeps {
   strategyDocs: string;
   brain: (prompt: string) => Promise<BrainOutput>;
   events?: EventEmitter;
+  // 캐치된 에러 메시지에서 마스킹할 시크릿 목록 (main.ts가 주입). 미주입 시 빈 배열.
+  secrets?: string[];
 }
 
 export interface CycleResult { skipped: boolean; reason?: string }
@@ -23,6 +25,15 @@ export interface CycleResult { skipped: boolean; reason?: string }
 const kstDate = (d: Date) => d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
 const nowISO = () => new Date().toISOString();
 const errMsg = (e: unknown) => e instanceof Error ? e.message : String(e);
+
+// 각 시크릿(6자 이상)을 '[REDACTED]'로 교체 (connection-test.ts의 scrub과 동일 동작).
+function scrub(text: string, secrets: string[]): string {
+  let out = text;
+  for (const s of secrets) {
+    if (s.length >= 6) out = out.replaceAll(s, '[REDACTED]');
+  }
+  return out;
+}
 
 // KST 09:00~09:30 — dayOpenEquity 초기화 허용 시간창 (슬립 복귀 오염 방지)
 function inDayOpenWindow(d: Date): boolean {
@@ -40,7 +51,9 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
   try {
     quoteList = await adapter.getQuotes(symbols);
   } catch (err) {
-    store.recordDecision(errorRow(`시세 조회 실패: ${errMsg(err)}`));
+    // 캐치된 에러는 브로커 HTTP 응답(키가 URL/본문에 echo될 수 있음)을 담을 수 있어 스크럽한다.
+    // 정상 판단의 reasoning(Claude 생성, 시크릿 미노출)·rejectReason(가드레일/브로커의 숫자·한도)은 스크럽 불필요.
+    store.recordDecision(errorRow(`시세 조회 실패: ${scrub(errMsg(err), deps.secrets ?? [])}`));
     deps.events?.emit('update');
     return { skipped: true, reason: String(err) };
   }
@@ -71,6 +84,20 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
   const ordersTodayKey = `ordersToday:${today}`;
   let ordersToday = Number(store.getKV(ordersTodayKey) ?? '0');
 
+  // 지표 필수 fail-safe — lastPrice-only 매매는 검증된 우위가 없고 수수료만 까먹으므로 기본 차단(requireIndicators=true).
+  // 지표가 비면 두뇌 호출·주문 제출을 모두 건너뛰고 SKIPPED 행만 남긴다.
+  // finishCycle은 그대로 호출해 스냅샷/벤치마크/onTick 체결은 유지한다.
+  if (config.requireIndicators && indicators.length === 0) {
+    const skipRow: DecisionRow = {
+      ts: nowISO(), action: 'HOLD', symbol: null, name: null, quantity: null, orderType: null,
+      limitPrice: null,
+      reasoning: '지표 데이터 없음 — requireIndicators=true이므로 매매를 건너뜁니다. 어댑터가 getCandles를 구현하거나 config requireIndicators=false로 변경하세요.',
+      status: 'SKIPPED', rejectReason: null, marketView: '', thesis: null,
+    };
+    finishCycle(deps, quotes, dailyPnlPct, tickTrades, [skipRow], ordersToday, ordersTodayKey, sellTimesFrom(tickTrades));
+    return { skipped: true, reason: 'no-indicators' };
+  }
+
   // 5) 두뇌
   let output: BrainOutput;
   try {
@@ -83,7 +110,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
       limits: config.guardrails, ordersToday,
     }));
   } catch (err) {
-    finishCycle(deps, quotes, dailyPnlPct, tickTrades, [errorRow(`브레인 호출 실패: ${errMsg(err)}`)], ordersToday, ordersTodayKey, sellTimesFrom(tickTrades));
+    finishCycle(deps, quotes, dailyPnlPct, tickTrades, [errorRow(`브레인 호출 실패: ${scrub(errMsg(err), deps.secrets ?? [])}`)], ordersToday, ordersTodayKey, sellTimesFrom(tickTrades));
     return { skipped: true, reason: String(err) };
   }
 
