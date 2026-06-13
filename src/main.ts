@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { loadConfig, isConfigured } from './core/config.js';
@@ -48,6 +48,15 @@ async function main(): Promise<void> {
 
   // ── OPERATIONAL MODE ──
 
+  // Claude Code CLI 가용성 점검 (경고만 — mock 모드나 이후 login으로도 동작 가능)
+  try {
+    execFileSync(config.claudeCmd, ['--version'], { stdio: 'ignore' });
+  } catch {
+    console.error(
+      `Claude Code CLI(\`${config.claudeCmd}\`)를 찾을 수 없습니다. 설치 후 \`claude login\`을 실행하세요.`,
+    );
+  }
+
   const store = new Store(config.dbPath);
 
   // universe.json 로드
@@ -60,6 +69,12 @@ async function main(): Promise<void> {
     universe = JSON.parse(readFileSync(universePath, 'utf-8')) as UniverseEntry[];
   } catch (err) {
     throw new Error(`strategy/universe.json 파싱 실패: ${(err as Error).message}`);
+  }
+  if (
+    !Array.isArray(universe) ||
+    !universe.every(u => u && typeof u.symbol === 'string' && typeof u.name === 'string')
+  ) {
+    throw new Error('strategy/universe.json은 [{"symbol","name"}] 배열이어야 합니다');
   }
 
   // strategy docs 로드 (strategy/*.md + *.txt)
@@ -90,8 +105,11 @@ async function main(): Promise<void> {
         const reg = JSON.parse(readFileSync(registryPath, 'utf-8')) as { baseUrl?: string };
         baseUrl = reg.baseUrl ?? '';
       } catch {
-        // registry 파싱 실패 시 baseUrl 빈 문자열
+        // parse 실패 — 아래 빈 baseUrl 경고로 처리
       }
+    }
+    if (!baseUrl) {
+      console.warn('adapters/registry.json을 읽을 수 없습니다 — 온보딩을 다시 실행하세요');
     }
     const adapterPath = resolve(ROOT, 'adapters', config.brokerId, 'adapter.ts');
     adapter = await loadAdapter(adapterPath, {

@@ -89,8 +89,20 @@ $('btn-finish').onclick = async () => {
         dailyLossLimitPct: Number($('g-dailyLossLimitPct').value),
       },
     });
-    document.body.innerHTML = '<div class="wrap"><div class="card"><h2>설정 완료</h2><p class="sub">대시보드로 이동합니다...</p></div></div>';
-    setTimeout(() => location.href = '/', 1500);
+    const host = location.host || 'localhost:3000';
+    const wrap = document.createElement('div');
+    wrap.className = 'wrap';
+    const card = document.createElement('div');
+    card.className = 'card';
+    const h2 = document.createElement('h2');
+    h2.textContent = '설정 완료';
+    const p = document.createElement('p');
+    p.className = 'sub';
+    p.textContent = `터미널에서 데몬이 재시작되면 http://${host}/ 으로 접속하세요. (이 창은 닫으셔도 됩니다)`;
+    card.append(h2, p);
+    wrap.appendChild(card);
+    document.body.textContent = '';
+    document.body.appendChild(wrap);
   } catch (err) { alert(err.message); }
 };
 

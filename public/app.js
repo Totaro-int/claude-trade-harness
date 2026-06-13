@@ -9,7 +9,8 @@ function render(s) {
   $('mode-badge').textContent = s.mode.toUpperCase();
   $('mode-badge').classList.toggle('live', s.mode === 'live');
   $('broker-badge').textContent = '● ' + (s.brokerName || 'mock') + ' 연결됨';
-  $('status-line').textContent = `마지막 업데이트 ${new Date(s.updatedAt).toLocaleTimeString('ko-KR')} · 가드레일 정상`;
+  const updatedLabel = s.updatedAt ? new Date(s.updatedAt).toLocaleTimeString('ko-KR') : '—';
+  $('status-line').textContent = `마지막 업데이트 ${updatedLabel} · 가드레일 정상`;
   $('warn-banner').hidden = !s.warning;
   if (s.warning) $('warn-text').textContent = s.warning;
 
@@ -71,12 +72,17 @@ function render(s) {
     box.appendChild(item);
   }
 
-  // 차트: 내 자산 vs 벤치마크
+  // 차트: 내 자산 vs 벤치마크 (스냅샷 없으면 초기화 건너뜀 — uPlot 빈배열 크래시 방지)
+  if (!s.snapshots.length) {
+    if (!chart) $('chart').textContent = '데이터 수집 중';
+    return;
+  }
   const xs = s.snapshots.map(r => new Date(r.ts).getTime() / 1000);
   const equitySeries = s.snapshots.map(r => r.equity);
   const benchSeries = s.snapshots.map(r => r.benchmark);
   const data = [xs, equitySeries, benchSeries];
   if (!chart) {
+    $('chart').textContent = '';
     chart = new uPlot({
       width: Math.min(720, document.body.clientWidth - 64), height: 200,
       series: [{}, { stroke: '#f04452', width: 2 }, { stroke: '#566070', width: 1.5, dash: [4, 4] }],
@@ -93,7 +99,3 @@ async function load() {
 load();
 const es = new EventSource('/events');
 es.onmessage = (e) => { try { render(JSON.parse(e.data)); } catch { /* 무시 */ } };
-setInterval(() => {
-  const m = $('status-line').textContent.match(/(\d+:\d+:\d+)/);
-  if (!m) return;
-}, 30000);

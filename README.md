@@ -104,7 +104,10 @@ npm start
 
 ```jsonc
 // strategy/universe.json
-{ "symbols": ["005930", "000660"] }
+[
+  { "symbol": "005930", "name": "삼성전자" },
+  { "symbol": "000660", "name": "SK하이닉스" }
+]
 ```
 
 ```markdown
