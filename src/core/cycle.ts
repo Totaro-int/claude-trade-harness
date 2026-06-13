@@ -16,6 +16,8 @@ export interface CycleDeps {
   strategyDocs: string;
   brain: (prompt: string) => Promise<BrainOutput>;
   events?: EventEmitter;
+  // 캐치된 에러 메시지에서 마스킹할 시크릿 목록 (main.ts가 주입). 미주입 시 빈 배열.
+  secrets?: string[];
 }
 
 export interface CycleResult { skipped: boolean; reason?: string }
@@ -23,6 +25,15 @@ export interface CycleResult { skipped: boolean; reason?: string }
 const kstDate = (d: Date) => d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
 const nowISO = () => new Date().toISOString();
 const errMsg = (e: unknown) => e instanceof Error ? e.message : String(e);
+
+// 각 시크릿(6자 이상)을 '[REDACTED]'로 교체 (connection-test.ts의 scrub과 동일 동작).
+function scrub(text: string, secrets: string[]): string {
+  let out = text;
+  for (const s of secrets) {
+    if (s.length >= 6) out = out.replaceAll(s, '[REDACTED]');
+  }
+  return out;
+}
 
 // KST 09:00~09:30 — dayOpenEquity 초기화 허용 시간창 (슬립 복귀 오염 방지)
 function inDayOpenWindow(d: Date): boolean {
@@ -40,7 +51,9 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
   try {
     quoteList = await adapter.getQuotes(symbols);
   } catch (err) {
-    store.recordDecision(errorRow(`시세 조회 실패: ${errMsg(err)}`));
+    // 캐치된 에러는 브로커 HTTP 응답(키가 URL/본문에 echo될 수 있음)을 담을 수 있어 스크럽한다.
+    // 정상 판단의 reasoning(Claude 생성, 시크릿 미노출)·rejectReason(가드레일/브로커의 숫자·한도)은 스크럽 불필요.
+    store.recordDecision(errorRow(`시세 조회 실패: ${scrub(errMsg(err), deps.secrets ?? [])}`));
     deps.events?.emit('update');
     return { skipped: true, reason: String(err) };
   }
@@ -83,7 +96,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
       limits: config.guardrails, ordersToday,
     }));
   } catch (err) {
-    finishCycle(deps, quotes, dailyPnlPct, tickTrades, [errorRow(`브레인 호출 실패: ${errMsg(err)}`)], ordersToday, ordersTodayKey, sellTimesFrom(tickTrades));
+    finishCycle(deps, quotes, dailyPnlPct, tickTrades, [errorRow(`브레인 호출 실패: ${scrub(errMsg(err), deps.secrets ?? [])}`)], ordersToday, ordersTodayKey, sellTimesFrom(tickTrades));
     return { skipped: true, reason: String(err) };
   }
 

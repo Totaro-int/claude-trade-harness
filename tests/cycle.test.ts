@@ -16,6 +16,7 @@ const universe = [
 function makeDeps(opts: {
   brain: (prompt: string) => Promise<BrainOutput>;
   presetPosition?: { symbol: string; quantity: number; avgPrice: number };
+  secrets?: string[];
 }): { deps: CycleDeps; broker: PaperBroker; store: Store } {
   const config = loadConfig('/nonexistent');
   const broker = new PaperBroker({
@@ -47,6 +48,7 @@ function makeDeps(opts: {
     strategyDocs: '테스트 전략',
     brain: opts.brain,
     events: new EventEmitter(),
+    secrets: opts.secrets,
   };
   return { deps, broker, store };
 }
@@ -252,6 +254,21 @@ describe('신규 사이클 동작', () => {
     expect(broker.positions).toHaveLength(1);
     expect(broker.positions[0]!.thesis?.why).toBe('저점 매수');
     expect(store.getKV(`pendingThesis:${SYM}`)).toBeNull();
+  });
+
+  it('시세 조회 실패 시 에러 메시지의 시크릿이 [REDACTED]로 마스킹된다', async () => {
+    const { deps, store } = makeDeps({
+      brain: async () => ({ marketView: '', decisions: [] }),
+      secrets: ['supersecretkey123'],
+    });
+    deps.adapter.getQuotes = async () => {
+      throw new Error('HTTP 401: token=supersecretkey123 invalid');
+    };
+    await runCycle(deps);
+    const d = store.getDecisions(10)[0];
+    expect(d.status).toBe('ERROR');
+    expect(d.reasoning).toContain('[REDACTED]');
+    expect(d.reasoning).not.toContain('supersecretkey123');
   });
 
   it('ordersToday KV가 체결마다 증가한다', async () => {
