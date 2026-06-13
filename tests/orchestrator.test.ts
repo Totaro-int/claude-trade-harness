@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SetupOrchestrator } from '../src/setup/orchestrator.js';
+import { SetupOrchestrator, validateDocsUrl } from '../src/setup/orchestrator.js';
 import { saveEnvFile } from '../src/env.js';
 
 function mkOrch() {
@@ -85,6 +85,36 @@ describe('SetupOrchestrator', () => {
   it('saveEnvFile: 값에 줄바꿈 포함 시 오류', () => {
     const root = mkdtempSync(join(tmpdir(), 'env-'));
     expect(() => saveEnvFile({ MY_KEY: 'value\ninjected' }, join(root, '.env'))).toThrow(/줄바꿈/);
+  });
+
+  // SSRF 가드 — validateDocsUrl 직접 단위 테스트
+  it.each([
+    ['file:///etc/passwd'],
+    ['http://169.254.169.254/'],
+    ['http://localhost:6379/'],
+    ['http://127.0.0.1:8080/'],
+    ['http://10.0.0.5/docs'],
+    ['http://192.168.1.1/'],
+    ['http://172.16.0.1/'],
+    ['http://[::1]/'],
+    ['ftp://example.com/docs'],
+  ])('validateDocsUrl("%s") → 차단/허용 오류', (badUrl) => {
+    expect(() => validateDocsUrl(badUrl)).toThrow(/차단|허용/);
+  });
+
+  it('validateDocsUrl: 정상 공개 https 문서 URL은 통과', () => {
+    expect(() => validateDocsUrl('https://api.example.com/docs')).not.toThrow();
+  });
+
+  // SSRF 가드 — fetchDocs/generate 경로에서 내부 주소 거부
+  it.each([
+    ['file:///etc/passwd'],
+    ['http://169.254.169.254/'],
+    ['http://localhost:6379/'],
+  ])('generate(): docsUrls=%s → SSRF 차단', async (badUrl) => {
+    const { orch } = mkOrch();
+    await orch.registerBroker({ brokerId: 'demo', brokerName: '데모증권', docsUrls: [badUrl], baseUrl: 'https://x.com', apiKey: 'k', apiSecret: 's', accountNo: '1' });
+    await expect(orch.generate(() => {})).rejects.toThrow(/차단|허용/);
   });
 
   // generateStrategy — 불량 JSON 응답 시 유효한 JSON 오류

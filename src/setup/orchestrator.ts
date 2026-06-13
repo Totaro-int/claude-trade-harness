@@ -7,6 +7,25 @@ import { loadAdapter } from '../broker/loader.js';
 import { runConnectionTest, type ConnResult } from './connection-test.js';
 import type { AdapterEnv } from '../broker/adapter.js';
 
+export function validateDocsUrl(url: string): void {
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { throw new Error(`유효하지 않은 문서 URL: ${url}`); }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`http/https 문서 URL만 허용됩니다: ${url}`);
+  }
+  const host = parsed.hostname.replace(/^\[|\]$/g, ''); // strip IPv6 brackets
+  // 루프백/링크로컬/사설 메타데이터 주소 차단 (SSRF)
+  if (
+    host === 'localhost' || host === '0.0.0.0' || host === '::1' ||
+    /^127\./.test(host) || /^169\.254\./.test(host) ||
+    /^10\./.test(host) || /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+    /^(fc|fd)[0-9a-f]{2}:/i.test(host) || host === '::'
+  ) {
+    throw new Error(`내부/사설 주소로의 문서 fetch는 차단됩니다: ${host}`);
+  }
+}
+
 export interface BrokerReg {
   brokerId: string; brokerName: string; docsUrls: string[];
   baseUrl: string; apiKey: string; apiSecret: string; accountNo: string;
@@ -57,6 +76,7 @@ export class SetupOrchestrator {
     if (!this.#broker) throw new Error('브로커 미등록');
     const parts: string[] = [];
     for (const url of this.#broker.docsUrls) {
+      validateDocsUrl(url);
       onProgress(`문서 수집: ${url}`);
       const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
       if (!res.ok) throw new Error(`문서 fetch 실패 ${res.status}: ${url}`);
