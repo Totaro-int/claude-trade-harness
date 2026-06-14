@@ -9,8 +9,9 @@ const base = {
   quotes: [{ symbol: '005930', name: '삼성전자', price: 71000, bid: 70900, ask: 71100, changeRate: 1.4, volume: 1000 }],
   indicators: [{ symbol: '005930', ma5: 70500, ma20: 69800, change5d: 2.1 }],
   recentDecisions: ['2026-06-11 BUY 삼성전자 10 [FILLED] — 반등 기대'],
+  reflections: [] as string[],
   limits: { maxPositionPct: 20, maxOrderPct: 10, maxOrdersPerCycle: 3, dailyLossLimitPct: 3,
-    maxOrdersPerDay: 10, reentryCooldownMin: 60, maxTotalExposurePct: 80 },
+    maxOrdersPerDay: 10, reentryCooldownMin: 60, maxTotalExposurePct: 80, minHoldMin: 0 },
   ordersToday: 2,
 };
 
@@ -23,6 +24,17 @@ describe('buildPrompt', () => {
     expect(p).toContain('70,500');             // ma5
     expect(p).toContain('2/10');               // ordersToday/maxOrdersPerDay
     expect(p).toContain('"thesis"');           // 출력 스키마 안내
+  });
+
+  it('회고가 비면 회고 섹션이 없다', () => {
+    const p = buildPrompt(base);
+    expect(p).not.toContain('과거 매매 회고');
+  });
+
+  it('회고가 있으면 회고 섹션에 렌더링된다', () => {
+    const p = buildPrompt({ ...base, reflections: ['삼성전자(005930) LOSS -3.1% · 보유 5h · 근거 "반등 기대" / 목표 +6% 손절 -3%'] });
+    expect(p).toContain('과거 매매 회고');
+    expect(p).toContain('LOSS -3.1%');
   });
 
   it('지표 없으면 "지표 데이터 없음" 명시 (환각 억제)', () => {

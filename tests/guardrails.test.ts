@@ -5,7 +5,7 @@ import type { GuardrailLimits } from '../src/core/config.js';
 
 const limits: GuardrailLimits = {
   maxPositionPct: 20, maxOrderPct: 10, maxOrdersPerCycle: 3, dailyLossLimitPct: 3,
-  maxOrdersPerDay: 10, reentryCooldownMin: 60, maxTotalExposurePct: 80,
+  maxOrdersPerDay: 10, reentryCooldownMin: 60, maxTotalExposurePct: 80, minHoldMin: 0,
 };
 
 function ctx(over: Partial<GuardrailContext> = {}): GuardrailContext {
@@ -92,7 +92,7 @@ describe('checkOrder', () => {
 describe('신규 가드레일', () => {
   const limits: GuardrailLimits = {
     maxPositionPct: 20, maxOrderPct: 10, maxOrdersPerCycle: 3, dailyLossLimitPct: 3,
-    maxOrdersPerDay: 10, reentryCooldownMin: 60, maxTotalExposurePct: 80,
+    maxOrdersPerDay: 10, reentryCooldownMin: 60, maxTotalExposurePct: 80, minHoldMin: 0,
   };
   const quote: Quote = { symbol: 'A', name: 'A', price: 10000, bid: 10000, ask: 10000, changeRate: 0, volume: 0 };
   const baseCtx = (over: Partial<GuardrailContext> = {}): GuardrailContext => ({
@@ -133,5 +133,43 @@ describe('신규 가드레일', () => {
     const r = checkOrder(buy, baseCtx({ lastSellAt: futureIso }), limits);
     expect(r.allowed).toBe(false);
     expect(r.reason).toContain('재진입 쿨다운');
+  });
+});
+
+describe('minHoldMin (회전율 가드레일)', () => {
+  const held = { symbol: 'A', name: 'A', quantity: 10, avgPrice: 10000 };
+  const sell = { side: 'SELL' as const, symbol: 'A', name: 'A', quantity: 10, orderType: 'MARKET' as const };
+  const limitsWithHold: GuardrailLimits = {
+    maxPositionPct: 20, maxOrderPct: 10, maxOrdersPerCycle: 3, dailyLossLimitPct: 3,
+    maxOrdersPerDay: 10, reentryCooldownMin: 60, maxTotalExposurePct: 80, minHoldMin: 30,
+  };
+  // 현재가 11000 → 보유(평단 10000) 대비 +10% 이익. 9000 → -10% 손실.
+  const mkCtx = (price: number, heldMinutes: number | null): GuardrailContext => ({
+    equity: 10_000_000, positions: [held],
+    quotes: new Map([['A', { symbol: 'A', name: 'A', price, bid: price, ask: price, changeRate: 0, volume: 0 }]]),
+    dailyPnlPct: 0, ordersThisCycle: 0, ordersToday: 0, lastSellAt: null,
+    now: new Date(), totalPositionValue: price * 10, heldMinutes,
+  });
+
+  it('이익 실현 매도 + 보유시간 미달 → 거부', () => {
+    const r = checkOrder(sell, mkCtx(11000, 10), limitsWithHold);
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toContain('최소 보유시간');
+  });
+
+  it('손절(평가손) 매도는 보유시간 미달이어도 허용', () => {
+    expect(checkOrder(sell, mkCtx(9000, 10), limitsWithHold).allowed).toBe(true);
+  });
+
+  it('보유시간 충족 시 이익 실현 매도 허용', () => {
+    expect(checkOrder(sell, mkCtx(11000, 60), limitsWithHold).allowed).toBe(true);
+  });
+
+  it('heldMinutes=null(백테스트)이면 minHold 미적용', () => {
+    expect(checkOrder(sell, mkCtx(11000, null), limitsWithHold).allowed).toBe(true);
+  });
+
+  it('minHoldMin=0이면 기존 동작 유지 (이익 매도 허용)', () => {
+    expect(checkOrder(sell, mkCtx(11000, 1), limits).allowed).toBe(true);
   });
 });

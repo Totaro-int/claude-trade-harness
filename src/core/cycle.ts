@@ -3,9 +3,13 @@ import type { AppConfig } from './config.js';
 import type { PaperBroker } from '../broker/paper.js';
 import type { BrokerAdapter } from '../broker/adapter.js';
 import type { Store, TradeRow, DecisionRow } from './store.js';
-import type { BrainOutput, Decision, IndicatorRow, OrderRequest, Quote, UniverseEntry } from './types.js';
+import type { BrainOutput, Decision, IndicatorRow, Position, Quote, Reflection, UniverseEntry } from './types.js';
+import { toOrder } from './orders.js';
 import { checkOrder } from '../guardrails/index.js';
 import { buildPrompt } from '../brain/prompt.js';
+import { buildReflection, formatReflections, REFLECTION_LIMIT } from '../brain/reflection.js';
+import { computeIndicatorRow } from './indicators.js';
+import type { SkepticInput, SkepticVerdict } from '../brain/skeptic.js';
 
 export interface CycleDeps {
   config: AppConfig;
@@ -18,6 +22,8 @@ export interface CycleDeps {
   events?: EventEmitter;
   // 캐치된 에러 메시지에서 마스킹할 시크릿 목록 (main.ts가 주입). 미주입 시 빈 배열.
   secrets?: string[];
+  // BUY 스켑틱 게이트 함수 (config.skepticGate=true일 때만 main.ts가 주입). 미주입 시 게이트 비활성.
+  skeptic?: (input: SkepticInput) => Promise<SkepticVerdict>;
 }
 
 export interface CycleResult { skipped: boolean; reason?: string }
@@ -73,11 +79,21 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
   const dayOpenEquity = Number(store.getKV(dayKey));
 
   // 4) 대기 지정가 체결 — 기록은 사이클 끝에 원자 저장
+  // 회고: onTick이 포지션을 줄이기 전에 스냅샷을 떠 두고, 체결된 매도의 thesis를 채점한다.
+  const prePos = new Map(broker.positions.map(p => [p.symbol, p]));
   const tickFills = broker.onTick(quotes);
   const tickTrades: TradeRow[] = tickFills.map(({ order, result }) => ({
     ts: nowISO(), side: order.side, symbol: order.symbol, name: order.name,
     quantity: order.quantity, price: result.fillPrice, fee: result.fee, tax: result.tax,
   }));
+  const newReflections: Reflection[] = [];
+  if (config.reflection) {
+    for (const { order, result } of tickFills) {
+      if (order.side !== 'SELL') continue;
+      const refl = reflectionFor(prePos.get(order.symbol), result.fillPrice);
+      if (refl) newReflections.push(refl);
+    }
+  }
 
   const equity = broker.equity(quotes);
   const dailyPnlPct = dayOpenEquity > 0 ? ((equity - dayOpenEquity) / dayOpenEquity) * 100 : 0;
@@ -94,7 +110,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
       reasoning: '지표 데이터 없음 — requireIndicators=true이므로 매매를 건너뜁니다. 어댑터가 getCandles를 구현하거나 config requireIndicators=false로 변경하세요.',
       status: 'SKIPPED', rejectReason: null, marketView: '', thesis: null,
     };
-    finishCycle(deps, quotes, dailyPnlPct, tickTrades, [skipRow], ordersToday, ordersTodayKey, sellTimesFrom(tickTrades));
+    finishCycle(deps, quotes, dailyPnlPct, tickTrades, [skipRow], ordersToday, ordersTodayKey, sellTimesFrom(tickTrades), [], [], newReflections);
     return { skipped: true, reason: 'no-indicators' };
   }
 
@@ -107,10 +123,11 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
       positions: broker.positions, quotes: quoteList, indicators,
       recentDecisions: store.getDecisions(20).map(d =>
         `${d.ts} ${d.action} ${d.name ?? ''} ${d.quantity ?? ''} [${d.status}] — ${d.reasoning}`.trim()),
+      reflections: config.reflection ? formatReflections(loadReflections(store).slice(-REFLECTION_LIMIT).reverse()) : [],
       limits: config.guardrails, ordersToday,
     }));
   } catch (err) {
-    finishCycle(deps, quotes, dailyPnlPct, tickTrades, [errorRow(`브레인 호출 실패: ${scrub(errMsg(err), deps.secrets ?? [])}`)], ordersToday, ordersTodayKey, sellTimesFrom(tickTrades));
+    finishCycle(deps, quotes, dailyPnlPct, tickTrades, [errorRow(`브레인 호출 실패: ${scrub(errMsg(err), deps.secrets ?? [])}`)], ordersToday, ordersTodayKey, sellTimesFrom(tickTrades), [], [], newReflections);
     return { skipped: true, reason: String(err) };
   }
 
@@ -130,9 +147,17 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
       continue;
     }
 
+    const now = new Date();
+    const heldPos = order.side === 'SELL' ? broker.positions.find(p => p.symbol === order.symbol) : undefined;
+    // openedAt이 손상돼 NaN이면 null로 — 그래야 가드가 minHold 판정을 건너뛴다(NaN<min은 false라 조용히 우회되는 것을 방지).
+    const heldMinutes = ((): number | null => {
+      if (!heldPos?.openedAt) return null;
+      const t = new Date(heldPos.openedAt).getTime();
+      return Number.isFinite(t) ? Math.max(0, (now.getTime() - t) / 60_000) : null;
+    })();
     const verdict = checkOrder(order, {
       equity, positions: broker.positions, quotes, dailyPnlPct, ordersThisCycle,
-      ordersToday, lastSellAt: store.getKV(`lastSell:${order.symbol}`), now: new Date(),
+      ordersToday, lastSellAt: store.getKV(`lastSell:${order.symbol}`), now, heldMinutes,
       totalPositionValue: broker.positions.reduce((s, p) => s + (quotes.get(p.symbol)?.price ?? p.avgPrice) * p.quantity, 0),
     }, config.guardrails);
     if (!verdict.allowed) {
@@ -140,6 +165,22 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
       continue;
     }
 
+    // 스켑틱 게이트: 돌이킬 수 없는 BUY만 2차 반박 검토. refute면 거부(매도/관망은 면제).
+    if (decision.action === 'BUY' && decision.thesis && config.skepticGate && deps.skeptic) {
+      const skepticVerdict = await deps.skeptic({
+        symbol: order.symbol, name: order.name, quantity: order.quantity,
+        reasoning: decision.reasoning, thesis: decision.thesis, marketView: output.marketView,
+        quote: quotes.get(order.symbol), indicator: indicators.find(r => r.symbol === order.symbol),
+        strategyDocs: deps.strategyDocs,
+      });
+      if (skepticVerdict.refute) {
+        decisionRows.push(toRow(decision, output.marketView, 'REJECTED', `스켑틱 게이트: ${skepticVerdict.reason}`, order.name));
+        continue;
+      }
+    }
+
+    // 회고: 매도 체결 직전의 포지션 스냅샷 (체결 시 broker가 줄이거나 삭제하므로 미리 보존)
+    const preSale = order.side === 'SELL' ? broker.positions.find(p => p.symbol === order.symbol) : undefined;
     const result = broker.submit(order, quotes);
     // ordersToday는 '오늘 제출한 주문 수' — PENDING 시점에 1회 계상, 이후 틱 체결 시 재계상 없음
     if (result.status === 'FILLED') {
@@ -151,7 +192,13 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
         // 직접 체결로 thesis를 새로 지정 → 이전 사이클의 미체결 지정가가 남긴 stale 키 제거
         clearThesisKeys.push(`pendingThesis:${order.symbol}`);
       }
-      if (decision.action === 'SELL') sellTimes.push([order.symbol, nowISO()]);
+      if (decision.action === 'SELL') {
+        sellTimes.push([order.symbol, nowISO()]);
+        if (config.reflection) {
+          const refl = reflectionFor(preSale, result.fillPrice);
+          if (refl) newReflections.push(refl);
+        }
+      }
       decisionRows.push(toRow(decision, output.marketView, 'FILLED', null, order.name));
     } else if (result.status === 'PENDING') {
       ordersThisCycle++; ordersToday++;
@@ -184,12 +231,39 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
     }
   }
 
-  finishCycle(deps, quotes, dailyPnlPct, trades, decisionRows, ordersToday, ordersTodayKey, sellTimes, pendingTheses, clearThesisKeys);
+  finishCycle(deps, quotes, dailyPnlPct, trades, decisionRows, ordersToday, ordersTodayKey, sellTimes, pendingTheses, clearThesisKeys, newReflections);
   return { skipped: false };
 }
 
 function sellTimesFrom(tickTrades: TradeRow[]): Array<[string, string]> {
   return tickTrades.filter(t => t.side === 'SELL').map(t => [t.symbol, t.ts]);
+}
+
+function reflectionFor(pre: Position | undefined, exitPrice: number): Reflection | null {
+  return pre ? buildReflection(pre, exitPrice, new Date()) : null;
+}
+
+/** 프롬프트에 주입되기 전 회고 요소의 형태/유한성을 검증한다 (스키마 변동·손상 시 NaN PnL 주입 방지). */
+function isReflection(x: unknown): x is Reflection {
+  if (!x || typeof x !== 'object') return false;
+  const r = x as Record<string, unknown>;
+  return typeof r.symbol === 'string' && typeof r.name === 'string'
+    && typeof r.why === 'string' && typeof r.target === 'string' && typeof r.stop === 'string'
+    && typeof r.pnlPct === 'number' && Number.isFinite(r.pnlPct)
+    && typeof r.heldHours === 'number' && Number.isFinite(r.heldHours)
+    && (r.result === 'WIN' || r.result === 'LOSS');
+}
+
+/** KV에 보관된 회고 목록(오래된→최신)을 읽는다. 손상/형식오류 요소는 거른다. */
+function loadReflections(store: Store): Reflection[] {
+  const raw = store.getKV('reflections');
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter(isReflection) : [];
+  } catch {
+    return [];
+  }
 }
 
 async function collectIndicators(adapter: BrokerAdapter, universe: UniverseEntry[]): Promise<IndicatorRow[]> {
@@ -198,23 +272,11 @@ async function collectIndicators(adapter: BrokerAdapter, universe: UniverseEntry
   for (const u of universe) {
     try {
       const c = await adapter.getCandles(u.symbol, 'day', 20);
-      if (c.length < 6) continue;
-      const closes = c.map(x => x.close);
-      const ma = (n: number) => Math.round(closes.slice(-n).reduce((a, b) => a + b, 0) / n);
-      out.push({
-        symbol: u.symbol, ma5: ma(5), ma20: closes.length >= 20 ? ma(20) : undefined,
-        change5d: Number(((closes.at(-1)! / closes.at(-6)! - 1) * 100).toFixed(2)),
-      });
+      const row = computeIndicatorRow(c);
+      if (row) out.push({ symbol: u.symbol, ...row });
     } catch { /* 지표는 best-effort — 실패한 종목만 생략, 사이클은 계속 */ }
   }
   return out;
-}
-
-function toOrder(d: Decision, quotes: Map<string, Quote>): OrderRequest | null {
-  if (!d.symbol || d.quantity == null || d.quantity <= 0 || !d.orderType) return null;
-  if (d.orderType === 'LIMIT' && !d.limitPrice) return null;
-  const name = quotes.get(d.symbol)?.name ?? d.symbol;
-  return { side: d.action as 'BUY' | 'SELL', symbol: d.symbol, name, quantity: d.quantity, orderType: d.orderType, limitPrice: d.limitPrice };
 }
 
 function toRow(d: Decision, marketView: string, status: string, rejectReason: string | null, name?: string): DecisionRow {
@@ -259,6 +321,7 @@ function finishCycle(
   ordersToday: number, ordersTodayKey: string, sellTimes: Array<[string, string]>,
   pendingTheses: Array<[string, string]> = [],
   clearThesisKeys: string[] = [],
+  newReflections: Reflection[] = [],
 ): void {
   const { broker, store, universe, config } = deps;
   const equity = broker.equity(quotes);
@@ -275,6 +338,10 @@ function finishCycle(
     if (newBaseline) store.setKV('benchmarkBaseline', JSON.stringify(newBaseline));
     for (const [key, val] of pendingTheses) store.setKV(key, val);
     for (const key of clearThesisKeys) store.deleteKV(key);
+    if (newReflections.length > 0) {
+      const merged = [...loadReflections(store), ...newReflections].slice(-REFLECTION_LIMIT);
+      store.setKV('reflections', JSON.stringify(merged));
+    }
   });
   deps.events?.emit('update');
 }

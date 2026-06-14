@@ -213,6 +213,71 @@ describe('신규 사이클 동작', () => {
     expect(store.getSnapshots(1)[0]!.benchmark).not.toBeNull();
   });
 
+  it('thesis 있는 포지션 매도 시 회고(reflection)가 KV에 누적된다', async () => {
+    // cycle 1: thesis와 함께 BUY → 포지션에 thesis·openedAt 기록
+    const { deps, store } = makeDeps({
+      brain: async () => ({
+        marketView: 'm',
+        decisions: [{
+          action: 'BUY', symbol: SYM, quantity: 1, orderType: 'MARKET', reasoning: '진입',
+          thesis: { why: '반등 기대', target: '+5%', stop: '-2%', exitCondition: '목표' },
+        }],
+      }),
+    });
+    await runCycle(deps);
+    expect(store.getKV('reflections')).toBeNull(); // 아직 청산 없음
+
+    // cycle 2: 전량 SELL → 회고 채점·누적
+    deps.brain = async () => ({
+      marketView: 'm',
+      decisions: [{ action: 'SELL', symbol: SYM, quantity: 1, orderType: 'MARKET', reasoning: '청산' }],
+    });
+    await runCycle(deps);
+
+    const raw = store.getKV('reflections');
+    expect(raw).not.toBeNull();
+    const arr = JSON.parse(raw!);
+    expect(arr).toHaveLength(1);
+    expect(arr[0].why).toBe('반등 기대');
+    expect(['WIN', 'LOSS']).toContain(arr[0].result);
+  });
+
+  it('KV에 손상된 회고 요소가 있으면 걸러내고 정상 요소만 프롬프트에 주입한다', async () => {
+    let captured = '';
+    const { deps, store } = makeDeps({
+      brain: async (prompt: string) => { captured = prompt; return { marketView: 'm', decisions: [] }; },
+    });
+    const good = {
+      ts: '2026-01-01T00:00:00Z', symbol: SYM, name: '삼성전자', why: '정상회고근거',
+      target: '+5%', stop: '-2%', entryPrice: 100, exitPrice: 110, pnlPct: 10, heldHours: 3, result: 'WIN',
+    };
+    const bad = { symbol: SYM, name: 'x', why: '손상회고', pnlPct: 'NaN', result: 'MAYBE' }; // 형식 오류
+    store.setKV('reflections', JSON.stringify([bad, good]));
+    await runCycle(deps);
+    expect(captured).toContain('정상회고근거');
+    expect(captured).not.toContain('손상회고');
+  });
+
+  it('reflection=false면 매도해도 회고가 누적되지 않는다', async () => {
+    const { deps, store } = makeDeps({
+      brain: async () => ({
+        marketView: 'm',
+        decisions: [{
+          action: 'BUY', symbol: SYM, quantity: 1, orderType: 'MARKET', reasoning: '진입',
+          thesis: { why: 'w', target: '+5%', stop: '-2%', exitCondition: 'x' },
+        }],
+      }),
+    });
+    deps.config = { ...deps.config, reflection: false };
+    await runCycle(deps);
+    deps.brain = async () => ({
+      marketView: 'm',
+      decisions: [{ action: 'SELL', symbol: SYM, quantity: 1, orderType: 'MARKET', reasoning: '청산' }],
+    });
+    await runCycle(deps);
+    expect(store.getKV('reflections')).toBeNull();
+  });
+
   it('SELL 체결 시 lastSell KV가 갱신된다', async () => {
     const { deps, store } = makeDeps({
       brain: async () => ({
@@ -305,6 +370,61 @@ describe('신규 사이클 동작', () => {
     (deps.adapter as { getCandles?: unknown }).getCandles = undefined;
     const result = await runCycle(deps);
     expect(result.skipped).toBe(false);
+    expect(broker.positions).toHaveLength(1);
+  });
+
+  it('스켑틱 게이트 refute → BUY가 REJECTED, 체결 안 됨', async () => {
+    const { deps, broker, store } = makeDeps({
+      brain: async () => ({
+        marketView: 'm',
+        decisions: [{
+          action: 'BUY', symbol: SYM, quantity: 1, orderType: 'MARKET', reasoning: '근거 약함',
+          thesis: { why: 'w', target: '+5%', stop: '-2%', exitCondition: 'x' },
+        }],
+      }),
+    });
+    deps.config = { ...deps.config, skepticGate: true };
+    deps.skeptic = async () => ({ refute: true, reason: '과매수 구간 매수' });
+    await runCycle(deps);
+    expect(broker.positions).toHaveLength(0);
+    expect(store.getTrades(10)).toHaveLength(0);
+    const d = store.getDecisions(10)[0];
+    expect(d.status).toBe('REJECTED');
+    expect(d.rejectReason).toContain('스켑틱 게이트');
+  });
+
+  it('스켑틱 게이트 통과(refute=false) → BUY 체결', async () => {
+    let called = false;
+    const { deps, broker } = makeDeps({
+      brain: async () => ({
+        marketView: 'm',
+        decisions: [{
+          action: 'BUY', symbol: SYM, quantity: 1, orderType: 'MARKET', reasoning: '근거 충분',
+          thesis: { why: 'w', target: '+5%', stop: '-2%', exitCondition: 'x' },
+        }],
+      }),
+    });
+    deps.config = { ...deps.config, skepticGate: true };
+    deps.skeptic = async () => { called = true; return { refute: false, reason: 'ok' }; };
+    await runCycle(deps);
+    expect(called).toBe(true);
+    expect(broker.positions).toHaveLength(1);
+  });
+
+  it('skepticGate=false면 skeptic 함수가 호출되지 않는다', async () => {
+    let called = false;
+    const { deps, broker } = makeDeps({
+      brain: async () => ({
+        marketView: 'm',
+        decisions: [{
+          action: 'BUY', symbol: SYM, quantity: 1, orderType: 'MARKET', reasoning: 'r',
+          thesis: { why: 'w', target: '+5%', stop: '-2%', exitCondition: 'x' },
+        }],
+      }),
+    });
+    deps.skeptic = async () => { called = true; return { refute: true, reason: 'x' }; };
+    await runCycle(deps); // config.skepticGate 기본 false
+    expect(called).toBe(false);
     expect(broker.positions).toHaveLength(1);
   });
 

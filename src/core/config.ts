@@ -8,6 +8,9 @@ export interface GuardrailLimits {
   maxOrdersPerDay: number;
   reentryCooldownMin: number;   // 매도 후 동일 종목 재매수 금지 시간(분)
   maxTotalExposurePct: number;  // 총 주식 노출 상한 (정수 %)
+  // 이익 실현 매도의 최소 보유시간(분). 회전율(잦은 매매 → 수수료 손실) 억제용.
+  // 손절(평가손) 매도는 항상 면제 — 리스크 관리 경로는 절대 막지 않는다. 기본 0 = 비활성.
+  minHoldMin: number;
 }
 
 export interface AppConfig {
@@ -21,6 +24,11 @@ export interface AppConfig {
   // 지표(getCandles) 데이터가 없으면 매매를 건너뛴다. lastPrice-only 매매는 검증된 우위가 없고
   // 수수료만 까먹는 노이즈 트레이딩이므로 기본 차단(true).
   requireIndicators: boolean;
+  // 청산된 매매의 thesis 결과를 회고로 누적해 프롬프트에 주입한다(과거 매매에서 학습). 기본 true.
+  reflection: boolean;
+  // BUY 결정에 2차 '회의론자' 반박 검토를 거친다(돌이킬 수 없는 매수만 한 번 더 검증). 매수마다 claude 1회 추가 호출.
+  // 기본 false (비용 발생). 백테스트에는 적용되지 않는다.
+  skepticGate: boolean;
   guardrails: GuardrailLimits;
   claudeCmd: string;
   dbPath: string;
@@ -36,6 +44,8 @@ const DEFAULTS: AppConfig = {
   halfSpreadPct: 0.0005,
   cycleMinutes: 30,
   requireIndicators: true,
+  reflection: true,
+  skepticGate: false,
   guardrails: {
     maxPositionPct: 20,
     maxOrderPct: 10,
@@ -44,6 +54,7 @@ const DEFAULTS: AppConfig = {
     maxOrdersPerDay: 10,
     reentryCooldownMin: 60,
     maxTotalExposurePct: 80,
+    minHoldMin: 0,
   },
   claudeCmd: 'claude',
   dbPath: 'data/state.db',

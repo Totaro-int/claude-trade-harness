@@ -1,8 +1,11 @@
 import type { AppConfig } from '../core/config.js';
-import type { BrainOutput, Candle, Decision, IndicatorRow, OrderRequest, Quote, UniverseEntry } from '../core/types.js';
+import type { BrainOutput, Candle, IndicatorRow, Quote, Reflection, UniverseEntry } from '../core/types.js';
+import { toOrder } from '../core/orders.js';
 import { PaperBroker } from '../broker/paper.js';
 import { checkOrder } from '../guardrails/index.js';
 import { buildPrompt } from '../brain/prompt.js';
+import { buildReflection, formatReflections, REFLECTION_LIMIT } from '../brain/reflection.js';
+import { computeIndicatorRow } from '../core/indicators.js';
 
 export interface BacktestInput {
   candlesBySymbol: Map<string, Candle[]>;  // 종목별 캔들, 시간순, 인덱스 기준 동일 길이/정렬
@@ -27,31 +30,17 @@ export interface BacktestReport {
   equityCurve: Array<{ i: number; equity: number; benchmark: number }>;
 }
 
-/** cycle.ts collectIndicators와 동일한 수식 — candles[0..i]에서 ma5/ma20/change5d 산출 */
+/** cycle.ts collectIndicators와 동일 — candles[0..i]에서 지표 산출 (공유 모듈 사용) */
 function computeIndicators(candlesBySymbol: Map<string, Candle[]>, universe: UniverseEntry[], i: number): IndicatorRow[] {
   const out: IndicatorRow[] = [];
   for (const u of universe) {
     const candles = candlesBySymbol.get(u.symbol);
     if (!candles) continue;
-    const closes = candles.slice(0, i + 1).map(c => c.close);
-    if (closes.length < 6) continue;
-    const ma = (n: number) => Math.round(closes.slice(-n).reduce((a, b) => a + b, 0) / n);
-    out.push({
-      symbol: u.symbol,
-      ma5: ma(5),
-      ma20: closes.length >= 20 ? ma(20) : undefined,
-      change5d: Number(((closes.at(-1)! / closes.at(-6)! - 1) * 100).toFixed(2)),
-    });
+    // 지표는 최대 20봉(drawdown)만 필요 — 매 봉 0..i 전체 슬라이스(O(N²)) 대신 최근 20봉으로 한정.
+    const row = computeIndicatorRow(candles.slice(Math.max(0, i - 19), i + 1));
+    if (row) out.push({ symbol: u.symbol, ...row });
   }
   return out;
-}
-
-/** cycle.ts toOrder와 동일 */
-function toOrder(d: Decision, quotes: Map<string, Quote>): OrderRequest | null {
-  if (!d.symbol || d.quantity == null || d.quantity <= 0 || !d.orderType) return null;
-  if (d.orderType === 'LIMIT' && !d.limitPrice) return null;
-  const name = quotes.get(d.symbol)?.name ?? d.symbol;
-  return { side: d.action as 'BUY' | 'SELL', symbol: d.symbol, name, quantity: d.quantity, orderType: d.orderType, limitPrice: d.limitPrice };
 }
 
 export async function runBacktest(input: BacktestInput): Promise<BacktestReport> {
@@ -113,16 +102,25 @@ export async function runBacktest(input: BacktestInput): Promise<BacktestReport>
   let maxDrawdownPct = 0;
   let prevEquity = initialCash;
   let lastQuotes = quotesAt(start);
+  const reflections: Reflection[] = [];   // 청산된 매매의 thesis 회고 (cycle.ts와 동일)
 
   for (let i = start; i < N; i++) {
     const quotes = quotesAt(i);
     lastQuotes = quotes;
+    // 합성 시계(에포크+i일). openedAt은 실시간이라 회고의 heldHours는 백테스트에서 항상 0으로 클램프된다(보유시간 신호 없음).
+    const now = new Date(i * 86_400_000);
 
-    // 1) 대기 지정가 체결 먼저
+    // 1) 대기 지정가 체결 먼저 — 회고용으로 체결 전 포지션 스냅샷
+    const prePos = new Map(broker.positions.map(p => [p.symbol, p]));
     const fills = broker.onTick(quotes);
-    for (const { result } of fills) {
+    for (const { order, result } of fills) {
       trades++;
       feesTotal += (result.fee ?? 0) + (result.tax ?? 0);
+      if (config.reflection && order.side === 'SELL') {
+        const pre = prePos.get(order.symbol);
+        const refl = pre ? buildReflection(pre, result.fillPrice, now) : null;
+        if (refl) reflections.push(refl);
+      }
     }
 
     // 2) 지표
@@ -142,11 +140,11 @@ export async function runBacktest(input: BacktestInput): Promise<BacktestReport>
       cash: broker.cash, equity: equityBefore, dailyPnlPct,
       positions: broker.positions, quotes: [...quotes.values()], indicators,
       recentDecisions: [],
+      reflections: config.reflection ? formatReflections(reflections.slice(-REFLECTION_LIMIT).reverse()) : [],
       limits: config.guardrails, ordersToday,
     }));
 
     // 5) 판단 실행
-    const now = new Date(i * 86_400_000);
     for (const decision of output.decisions) {
       if (decision.action === 'HOLD') continue;
       const order = toOrder(decision, quotes);
@@ -154,17 +152,22 @@ export async function runBacktest(input: BacktestInput): Promise<BacktestReport>
 
       const verdict = checkOrder(order, {
         equity: equityBefore, positions: broker.positions, quotes, dailyPnlPct,
-        ordersThisCycle, ordersToday, lastSellAt: null, now,
+        ordersThisCycle, ordersToday, lastSellAt: null, now, heldMinutes: null, // 일봉은 분 단위 minHold 무의미
         totalPositionValue: broker.positions.reduce((s, p) => s + (quotes.get(p.symbol)?.price ?? p.avgPrice) * p.quantity, 0),
       }, config.guardrails);
       if (!verdict.allowed) continue;
 
+      const preSale = order.side === 'SELL' ? broker.positions.find(p => p.symbol === order.symbol) : undefined;
       const result = broker.submit(order, quotes);
       if (result.status === 'FILLED') {
         ordersThisCycle++; ordersToday++;
         trades++;
         feesTotal += (result.fee ?? 0) + (result.tax ?? 0);
         if (decision.action === 'BUY' && decision.thesis) broker.setThesis(order.symbol, decision.thesis);
+        if (config.reflection && decision.action === 'SELL' && preSale) {
+          const refl = buildReflection(preSale, result.fillPrice, now);
+          if (refl) reflections.push(refl);
+        }
       } else if (result.status === 'PENDING') {
         ordersThisCycle++; ordersToday++;
         // 미체결 지정가는 큐에 유지 — 다음 막대 onTick에서 체결 시도

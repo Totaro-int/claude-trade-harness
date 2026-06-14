@@ -28,7 +28,7 @@ export interface BrainOptions {
 }
 
 /** 첫 '{'부터 중괄호 깊이가 0으로 닫히는 지점까지의 첫 JSON 오브젝트를 추출 (문자열 내 중괄호/이스케이프 처리) */
-function extractFirstJsonObject(text: string): string | null {
+export function extractFirstJsonObject(text: string): string | null {
   const start = text.indexOf('{');
   if (start < 0) return null;
   let depth = 0;
@@ -47,10 +47,17 @@ function extractFirstJsonObject(text: string): string | null {
 }
 
 /** claude -p 헤드리스 호출 (envelope JSON → result text 추출) */
+/** 프롬프트는 argv 한 요소로 전달되므로 OS ARG_MAX(macOS 1MB)에 못 미치게 상한. */
+const MAX_PROMPT_BYTES = 800_000;
+
 export async function runClaudeText(
   prompt: string,
   opts: { claudeCmd: string; timeoutMs: number },
 ): Promise<string> {
+  const promptBytes = Buffer.byteLength(prompt, 'utf8');
+  if (promptBytes > MAX_PROMPT_BYTES) {
+    throw new Error(`프롬프트가 너무 큽니다: ${promptBytes} bytes (상한 ${MAX_PROMPT_BYTES}). 전략 문서/유니버스를 줄이세요.`);
+  }
   const { stdout } = await pExecFile(
     opts.claudeCmd,
     ['-p', prompt, '--output-format', 'json'],

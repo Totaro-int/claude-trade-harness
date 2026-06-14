@@ -1,7 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { runBrain, BrainOutputSchema, BrainAuthError } from '../src/brain/runner.js';
+import { runBrain, runClaudeText, BrainOutputSchema, BrainAuthError } from '../src/brain/runner.js';
 
 const STUB = 'tests/fixtures/claude-stub.sh';
+
+describe('runClaudeText 프롬프트 상한', () => {
+  it('프롬프트가 상한(800KB)을 넘으면 spawn 전에 throw', async () => {
+    const huge = 'x'.repeat(900_000);
+    await expect(runClaudeText(huge, { claudeCmd: STUB, timeoutMs: 1000 })).rejects.toThrow(/너무 큽니다/);
+  });
+});
 
 describe('runBrain', () => {
   it('스텁 출력에서 JSON을 추출하고 스키마 검증해 반환', async () => {

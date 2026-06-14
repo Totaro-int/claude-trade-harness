@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { execFile, execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { readFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { loadConfig, isConfigured } from './core/config.js';
 import { Store } from './core/store.js';
 import { loadEnvFile } from './env.js';
@@ -12,8 +12,10 @@ import { assertLiveUnlocked } from './broker/live.js';
 import { startScheduler } from './core/scheduler.js';
 import { runCycle } from './core/cycle.js';
 import { runBrain, BrainAuthError } from './brain/runner.js';
+import { makeSkeptic } from './brain/skeptic.js';
 import { startServer } from './server/index.js';
 import { SetupOrchestrator } from './setup/orchestrator.js';
+import { loadStrategyDocs } from './backtest/load.js';
 import type { UniverseEntry } from './core/types.js';
 
 const ROOT = process.cwd();
@@ -77,19 +79,7 @@ async function main(): Promise<void> {
     throw new Error('strategy/universe.json은 [{"symbol","name"}] 배열이어야 합니다');
   }
 
-  // strategy docs 로드 (strategy/*.md + *.txt)
-  function loadStrategyDocs(): string {
-    const stratDir = resolve(ROOT, 'strategy');
-    if (!existsSync(stratDir)) return '(전략 문서 없음)';
-    let files: string[];
-    try {
-      files = readdirSync(stratDir).filter(f => f.endsWith('.md') || f.endsWith('.txt'));
-    } catch {
-      return '(전략 문서 없음)';
-    }
-    if (files.length === 0) return '(전략 문서 없음)';
-    return files.map(f => readFileSync(join(stratDir, f), 'utf-8')).join('\n\n---\n\n');
-  }
+  // strategy docs 로드 (strategy/*.md + *.txt) — backtest/load.ts 공유본 사용
   const strategyDocs = loadStrategyDocs();
 
   // 어댑터 로드
@@ -181,6 +171,11 @@ async function main(): Promise<void> {
     }
   };
 
+  // 스켑틱 게이트 (config.skepticGate=true일 때만 — 매수마다 claude 1회 추가 호출)
+  const skeptic = config.skepticGate
+    ? makeSkeptic({ claudeCmd: config.claudeCmd, timeoutMs: 90_000 })
+    : undefined;
+
   // 스케줄러 시작
   const stopScheduler = startScheduler({
     cycleMinutes: config.cycleMinutes,
@@ -196,6 +191,7 @@ async function main(): Promise<void> {
         brain,
         events,
         secrets,
+        skeptic,
       }),
     onMarketClose: () => {
       broker.cancelAllPending();

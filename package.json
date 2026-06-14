@@ -9,6 +9,7 @@
     "dev": "tsx src/main.ts",
     "start": "tsx src/main.ts",
     "backtest": "tsx src/backtest/main.ts",
+    "eval": "tsx src/backtest/eval-main.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",

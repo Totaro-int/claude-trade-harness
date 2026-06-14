@@ -42,6 +42,9 @@ describe('loadConfig', () => {
     expect(c.guardrails.maxOrdersPerDay).toBe(10);
     expect(c.guardrails.reentryCooldownMin).toBe(60);
     expect(c.guardrails.maxTotalExposurePct).toBe(80);
+    expect(c.guardrails.minHoldMin).toBe(0);
+    expect(c.reflection).toBe(true);
+    expect(c.skepticGate).toBe(false);
     expect(c.brokerId).toBe('');
   });
 });

@@ -12,6 +12,8 @@ export interface GuardrailContext {
   now: Date;
   /** 전 종목 보유 평가액 합 = Σ(quantity × 현재가). 호출자가 정확히 계산해 전달해야 함 — 0을 넣으면 총노출 가드가 무력화된다. */
   totalPositionValue: number;
+  /** 이 주문 종목을 보유한 시간(분). minHoldMin 가드용. null/미지정이면 minHold 판정을 건너뛴다(일봉 백테스트 등). */
+  heldMinutes?: number | null;
 }
 
 export interface GuardrailVerdict {
@@ -36,7 +38,20 @@ export function checkOrder(
   }
 
   // SELL은 일일상한/재진입 쿨다운에서 면제 — 손절 경로를 항상 열어 두기 위함. maxOrdersPerCycle과 수량 유효성 검증은 위에서 이미 적용됨.
-  if (order.side === 'SELL') return { allowed: true };
+  if (order.side === 'SELL') {
+    // 회전율 억제: 최소 보유시간 미달이면서 '이익' 실현인 매도만 거부. 평가손(손절) 매도는 항상 허용.
+    if (limits.minHoldMin > 0 && ctx.heldMinutes != null && ctx.heldMinutes < limits.minHoldMin) {
+      const held = ctx.positions.find(p => p.symbol === order.symbol);
+      const pnlPct = held && held.avgPrice > 0 ? (q.price / held.avgPrice - 1) * 100 : 0;
+      if (pnlPct > 0) {
+        return {
+          allowed: false,
+          reason: `최소 보유시간 미달 (${Math.round(ctx.heldMinutes)}/${limits.minHoldMin}분) — 이익 실현 보류 (손절은 허용)`,
+        };
+      }
+    }
+    return { allowed: true };
+  }
 
   if (ctx.ordersToday >= limits.maxOrdersPerDay) {
     return { allowed: false, reason: `일일 최대 주문 수(${limits.maxOrdersPerDay}건) 초과` };

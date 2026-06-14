@@ -31,6 +31,8 @@ const BASE_CONFIG: AppConfig = {
   halfSpreadPct: 0.0005,
   cycleMinutes: 30,
   requireIndicators: true,
+  reflection: true,
+  skepticGate: false,
   guardrails: {
     maxPositionPct: 20,
     maxOrderPct: 10,
@@ -39,6 +41,7 @@ const BASE_CONFIG: AppConfig = {
     maxOrdersPerDay: 10,
     reentryCooldownMin: 60,
     maxTotalExposurePct: 80,
+    minHoldMin: 0,
   },
   claudeCmd: 'claude',
   dbPath: ':memory:',

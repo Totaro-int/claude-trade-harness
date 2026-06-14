@@ -1,15 +1,9 @@
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { resolve, join } from 'node:path';
 import { loadConfig } from '../core/config.js';
-import { loadEnvFile } from '../env.js';
-import { MockAdapter } from '../broker/mock.js';
-import { loadAdapter } from '../broker/loader.js';
 import { runBrain } from '../brain/runner.js';
 import { runBacktest } from './runner.js';
-import type { BrokerAdapter } from '../broker/adapter.js';
-import type { BrainOutput, Candle, UniverseEntry } from '../core/types.js';
+import { loadUniverse, loadStrategyDocs, loadBacktestAdapter, collectCandles } from './load.js';
+import type { BrainOutput } from '../core/types.js';
 
-const ROOT = process.cwd();
 const won = (n: number) => Math.round(n).toLocaleString('ko-KR');
 
 function parseBars(argv: string[]): number {
@@ -21,57 +15,6 @@ function parseBars(argv: string[]): number {
   return 60;
 }
 
-function loadUniverse(): UniverseEntry[] {
-  const path = resolve(ROOT, 'strategy', 'universe.json');
-  if (!existsSync(path)) {
-    throw new Error('strategy/universe.json 파일이 없습니다. 온보딩을 먼저 완료하거나 파일을 생성하세요.');
-  }
-  let universe: UniverseEntry[];
-  try {
-    universe = JSON.parse(readFileSync(path, 'utf-8')) as UniverseEntry[];
-  } catch (err) {
-    throw new Error(`strategy/universe.json 파싱 실패: ${(err as Error).message}`);
-  }
-  if (!Array.isArray(universe) || !universe.every(u => u && typeof u.symbol === 'string' && typeof u.name === 'string')) {
-    throw new Error('strategy/universe.json은 [{"symbol","name"}] 배열이어야 합니다');
-  }
-  return universe;
-}
-
-function loadStrategyDocs(): string {
-  const stratDir = resolve(ROOT, 'strategy');
-  if (!existsSync(stratDir)) return '(전략 문서 없음)';
-  let files: string[];
-  try {
-    files = readdirSync(stratDir).filter(f => f.endsWith('.md') || f.endsWith('.txt'));
-  } catch {
-    return '(전략 문서 없음)';
-  }
-  if (files.length === 0) return '(전략 문서 없음)';
-  return files.map(f => readFileSync(join(stratDir, f), 'utf-8')).join('\n\n---\n\n');
-}
-
-async function loadBacktestAdapter(config: ReturnType<typeof loadConfig>, universe: UniverseEntry[]): Promise<BrokerAdapter> {
-  if (config.brokerId === 'mock' || config.brokerId === '') {
-    return new MockAdapter(universe);
-  }
-  const env = loadEnvFile(resolve(ROOT, '.env'));
-  const registryPath = resolve(ROOT, 'adapters', 'registry.json');
-  let baseUrl = '';
-  if (existsSync(registryPath)) {
-    try {
-      baseUrl = (JSON.parse(readFileSync(registryPath, 'utf-8')) as { baseUrl?: string }).baseUrl ?? '';
-    } catch { /* 빈 baseUrl로 진행 */ }
-  }
-  const adapterPath = resolve(ROOT, 'adapters', config.brokerId, 'adapter.ts');
-  const adapter = await loadAdapter(adapterPath, {
-    apiKey: env['BROKER_API_KEY'] ?? '', apiSecret: env['BROKER_API_SECRET'] ?? '',
-    accountNo: env['BROKER_ACCOUNT_NO'] ?? '', baseUrl,
-  });
-  await adapter.auth();
-  return adapter;
-}
-
 async function main(): Promise<void> {
   const config = loadConfig();
   const bars = parseBars(process.argv.slice(2));
@@ -79,31 +22,8 @@ async function main(): Promise<void> {
   const strategyDocs = loadStrategyDocs();
 
   const adapter = await loadBacktestAdapter(config, universe);
-  if (!adapter.getCandles) {
-    console.error('이 어댑터는 getCandles를 구현하지 않아 백테스트할 수 없습니다.');
-    process.exit(1);
-  }
-
-  // 종목별 캔들 수집
-  const candlesBySymbol = new Map<string, Candle[]>();
-  for (const u of universe) {
-    try {
-      const c = await adapter.getCandles(u.symbol, 'day', bars);
-      if (c.length > 0) candlesBySymbol.set(u.symbol, c);
-    } catch (err) {
-      console.warn(`${u.symbol} 캔들 조회 실패 — 제외: ${(err as Error).message}`);
-    }
-  }
-  if (candlesBySymbol.size === 0) {
-    console.error('수집된 캔들이 없습니다. 어댑터/유니버스를 확인하세요.');
-    process.exit(1);
-  }
-
-  // 인덱스 정렬 가정 — 가장 짧은 길이로 잘라 맞춤
+  const candlesBySymbol = await collectCandles(adapter, universe, bars);
   const minLen = Math.min(...[...candlesBySymbol.values()].map(c => c.length));
-  for (const [s, c] of candlesBySymbol) {
-    if (c.length !== minLen) candlesBySymbol.set(s, c.slice(c.length - minLen));
-  }
 
   const startIndex = Math.min(20, minLen - 1);
   const tradingBars = Math.max(0, minLen - startIndex);

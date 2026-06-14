@@ -73,9 +73,28 @@ export interface BrainOutput {
 
 export interface UniverseEntry { symbol: string; name: string }
 
+/** 청산된 포지션의 thesis 결과 기록 — 두뇌가 과거 매매에서 배우게 하는 메모리. */
+export interface Reflection {
+  ts: string;            // 청산 시각 ISO
+  symbol: string;
+  name: string;
+  why: string;           // 진입 당시 thesis.why
+  target: string;        // thesis.target
+  stop: string;          // thesis.stop
+  entryPrice: number;    // 청산 시점 avgPrice
+  exitPrice: number;     // 체결가
+  pnlPct: number;        // (exit/entry - 1) * 100
+  heldHours: number;     // 보유 시간(시간), 음수면 0으로 클램프 (일봉 백테스트에선 0)
+  result: 'WIN' | 'LOSS';
+}
+
 export interface IndicatorRow {
   symbol: string;
   ma5?: number;
   ma20?: number;
-  change5d?: number; // 5거래일 등락률 %
+  change5d?: number;    // 5거래일 등락률 %
+  rsi14?: number;       // RSI(14), 0~100 — 과매수/과매도
+  atrPct?: number;      // ATR(14) ÷ 현재가 × 100 (%) — 변동성
+  drawdownPct?: number; // 최근 20봉 고점 대비 낙폭 (%, ≥0)
+  volume?: number;      // 최근 봉 거래량
 }
