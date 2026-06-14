@@ -54,6 +54,17 @@ describe('thesis 스키마 & 세션 만료', () => {
     expect(r.success).toBe(true);
   });
 
+  it('thesis.why가 상한(500자)을 넘으면 스키마 거부', () => {
+    const r = BrainOutputSchema.safeParse({
+      marketView: 'm',
+      decisions: [{
+        action: 'BUY', symbol: 'A', quantity: 1, orderType: 'MARKET', reasoning: 'r',
+        thesis: { why: 'x'.repeat(501), target: '+5%', stop: '-2%', exitCondition: '목표' },
+      }],
+    });
+    expect(r.success).toBe(false);
+  });
+
   it('세션 만료 stderr 패턴이면 BrainAuthError', async () => {
     await expect(runBrain('p', { claudeCmd: 'tests/fixtures/claude-stub-auth-error.sh', timeoutMs: 5000 }))
       .rejects.toThrow(BrainAuthError);

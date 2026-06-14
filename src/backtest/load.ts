@@ -1,5 +1,5 @@
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { readFileSync, readdirSync, existsSync, realpathSync } from 'node:fs';
+import { resolve, join, sep } from 'node:path';
 import type { AppConfig } from '../core/config.js';
 import { loadEnvFile } from '../env.js';
 import { MockAdapter } from '../broker/mock.js';
@@ -26,6 +26,15 @@ export function loadUniverse(): UniverseEntry[] {
   return universe;
 }
 
+/** filePath의 실제 경로가 dir 안에 있는지 검증한다 (심볼릭링크로 디렉터리 밖 파일을 읽는 것 차단). */
+export function assertWithinDir(filePath: string, dir: string): void {
+  const real = realpathSync(filePath);
+  const base = realpathSync(dir);
+  if (real !== base && !real.startsWith(base + sep)) {
+    throw new Error(`허용된 디렉터리 밖의 파일입니다: ${real}`);
+  }
+}
+
 export function loadStrategyDocs(): string {
   const stratDir = resolve(ROOT, 'strategy');
   if (!existsSync(stratDir)) return '(전략 문서 없음)';
@@ -36,7 +45,11 @@ export function loadStrategyDocs(): string {
     return '(전략 문서 없음)';
   }
   if (files.length === 0) return '(전략 문서 없음)';
-  return files.map(f => readFileSync(join(stratDir, f), 'utf-8')).join('\n\n---\n\n');
+  return files.map(f => {
+    const p = join(stratDir, f);
+    assertWithinDir(p, stratDir);
+    return readFileSync(p, 'utf-8');
+  }).join('\n\n---\n\n');
 }
 
 export async function loadBacktestAdapter(config: AppConfig, universe: UniverseEntry[]): Promise<BrokerAdapter> {

@@ -1,10 +1,12 @@
 import { z } from 'zod';
 
+// thesis 필드는 reflections KV에 누적돼 이후 프롬프트에 재주입되므로 길이 상한으로
+// 비대화(무한 누적)·간접 프롬프트 인젝션 증폭을 방지한다.
 const ThesisSchema = z.object({
-  why: z.string().min(1),
-  target: z.string().min(1),
-  stop: z.string().min(1),
-  exitCondition: z.string().min(1),
+  why: z.string().min(1).max(500),
+  target: z.string().min(1).max(200),
+  stop: z.string().min(1).max(200),
+  exitCondition: z.string().min(1).max(500),
 });
 
 // HOLD는 전역 관망 — 종목별 hold가 아니라 "이번 사이클은 아무것도 안 함"

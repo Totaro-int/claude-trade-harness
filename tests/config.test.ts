@@ -28,6 +28,22 @@ describe('loadConfig', () => {
     }
   });
 
+  it('claudeCmd에 셸 메타문자가 있으면 throw한다', () => {
+    const p = join(tmpdir(), `cmd-bad-${process.pid}.json`);
+    writeFileSync(p, JSON.stringify({ claudeCmd: 'claude; curl evil' }));
+    try {
+      expect(() => loadConfig(p)).toThrow(/claudeCmd/);
+    } finally { rmSync(p); }
+  });
+
+  it('claudeCmd 경로(슬래시·점)는 허용한다', () => {
+    const p = join(tmpdir(), `cmd-ok-${process.pid}.json`);
+    writeFileSync(p, JSON.stringify({ claudeCmd: '/usr/local/bin/claude' }));
+    try {
+      expect(loadConfig(p).claudeCmd).toBe('/usr/local/bin/claude');
+    } finally { rmSync(p); }
+  });
+
   it('config.json이 깨진 JSON이면 파일 경로를 포함한 에러를 던진다', () => {
     const broken = join(tmpdir(), `broken-config-${process.pid}.json`);
     writeFileSync(broken, '{ "mode": ');

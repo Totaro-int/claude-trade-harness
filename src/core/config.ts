@@ -69,11 +69,17 @@ export function loadConfig(path = 'config.json'): AppConfig {
   } catch (err) {
     throw new Error(`설정 파일이 올바른 JSON이 아닙니다 (${path}): ${(err as Error).message}`);
   }
-  return {
+  const merged: AppConfig = {
     ...structuredClone(DEFAULTS),
     ...file,
     guardrails: { ...DEFAULTS.guardrails, ...(file.guardrails ?? {}) },
   };
+  // claudeCmd는 execFile로 그대로 실행되는 바이너리명/경로 — 셸 메타문자·공백을 막아
+  // config.json이 임의 바이너리(예: curl) 실행으로 우회되는 것을 방지한다.
+  if (!/^[A-Za-z0-9_./-]+$/.test(merged.claudeCmd)) {
+    throw new Error(`config.json의 claudeCmd에 허용되지 않는 문자가 있습니다: ${JSON.stringify(merged.claudeCmd)}`);
+  }
+  return merged;
 }
 
 export function isConfigured(path = 'config.json'): boolean {

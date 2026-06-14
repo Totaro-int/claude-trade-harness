@@ -3,7 +3,7 @@ import { resolve, join, basename } from 'node:path';
 import { loadConfig } from '../core/config.js';
 import { runBrain } from '../brain/runner.js';
 import { runEval, type EvalVariant } from './eval.js';
-import { loadUniverse, loadStrategyDocs, loadBacktestAdapter, collectCandles } from './load.js';
+import { loadUniverse, loadStrategyDocs, loadBacktestAdapter, collectCandles, assertWithinDir } from './load.js';
 import type { BrainOutput } from '../core/types.js';
 
 const ROOT = process.cwd();
@@ -26,7 +26,9 @@ function loadVariants(baseDocs: string): EvalVariant[] {
   if (!existsSync(evalDir)) return variants;
   const files = readdirSync(evalDir).filter(f => f.endsWith('.md') || f.endsWith('.txt')).sort();
   for (const f of files) {
-    variants.push({ label: basename(f).replace(/\.(md|txt)$/, ''), strategyDocs: readFileSync(join(evalDir, f), 'utf-8') });
+    const p = join(evalDir, f);
+    assertWithinDir(p, evalDir);
+    variants.push({ label: basename(f).replace(/\.(md|txt)$/, ''), strategyDocs: readFileSync(p, 'utf-8') });
   }
   return variants;
 }

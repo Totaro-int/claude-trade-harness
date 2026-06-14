@@ -4,7 +4,7 @@ import { runClaudeText, extractFirstJsonObject } from './runner.js';
 
 export const SkepticVerdictSchema = z.object({
   refute: z.boolean(),
-  reason: z.string(),
+  reason: z.string().max(300),  // rejectReason로 DB에 저장·대시보드 노출 — 길이 상한
 });
 export type SkepticVerdict = z.infer<typeof SkepticVerdictSchema>;
 
