@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { loadConfig, isConfigured } from './core/config.js';
@@ -10,7 +10,11 @@ import { loadAdapter } from './broker/loader.js';
 import { PaperBroker } from './broker/paper.js';
 import { assertLiveUnlocked } from './broker/live.js';
 import { startScheduler } from './core/scheduler.js';
+import { buildHolidaySet, isTradingDay } from './core/market-calendar.js';
 import { runCycle } from './core/cycle.js';
+import { initHealth, recordCycleStart, recordCycleOk, recordCycleError, readHealth, FAILURE_THRESHOLD } from './core/health.js';
+import { makeAlerter } from './core/alert.js';
+import { scrub, errMsg } from './core/scrub.js';
 import { runBrain, BrainAuthError } from './brain/runner.js';
 import { makeSkeptic } from './brain/skeptic.js';
 import { startServer } from './server/index.js';
@@ -19,12 +23,6 @@ import { loadStrategyDocs } from './backtest/load.js';
 import type { UniverseEntry } from './core/types.js';
 
 const ROOT = process.cwd();
-
-function notifyMac(msg: string): void {
-  if (process.platform === 'darwin') {
-    execFile('osascript', ['-e', `display notification ${JSON.stringify(msg)} with title "claude-trade-harness"`], () => {});
-  }
-}
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -151,6 +149,20 @@ async function main(): Promise<void> {
     broker = new PaperBroker({ initialCash: config.initialCash, ...rates });
   }
 
+  // 운영 알림 발송기 (webhook 설정 시 원격, 아니면 콘솔·macOS 로컬)
+  const alert = makeAlerter({ webhookUrl: config.alertWebhook });
+
+  // 치명적 오류 — 상태 저장 + 알림 후 종료(supervisor가 재시작). 미처리 예외/거부를 잡는다.
+  const onFatal = (label: string) => (err: unknown): void => {
+    const msg = scrub(errMsg(err), secrets);
+    console.error(`[fatal:${label}] ${msg}`);
+    try { store.setKV('broker', JSON.stringify(broker.toJSON())); } catch { /* best-effort */ }
+    void alert(`치명적 오류(${label}) — 프로세스 종료, 재시작 필요: ${msg}`);
+    setTimeout(() => process.exit(1), 1_000); // webhook 발송 여유
+  };
+  process.on('uncaughtException', onFatal('uncaughtException'));
+  process.on('unhandledRejection', onFatal('unhandledRejection'));
+
   // Brain 래퍼 — BrainAuthError를 경고로 기록
   let consecutiveAuthErrors = 0;
   const brain = async (prompt: string): Promise<import('./core/types.js').BrainOutput> => {
@@ -164,7 +176,7 @@ async function main(): Promise<void> {
         store.setKV('warning', 'claude CLI 인증 필요 — 터미널에서 claude login 후 재시작');
         // 스트릭 첫 오류에만 알림 발송 (반복 사이클 중복 알림 방지)
         if (consecutiveAuthErrors === 1) {
-          notifyMac('claude-trade-harness: claude CLI 인증 필요 — 터미널에서 claude login 후 재시작');
+          void alert('claude CLI 인증 필요 — 터미널에서 claude login 후 재시작');
         }
       }
       throw err;
@@ -176,26 +188,37 @@ async function main(): Promise<void> {
     ? makeSkeptic({ claudeCmd: config.claudeCmd, timeoutMs: 90_000 })
     : undefined;
 
-  // 스케줄러 시작
+  // 스케줄러 시작 — 거래일(주말·휴장일 제외) 판정을 어댑터 장중 시간과 결합
+  const holidays = buildHolidaySet(config.holidays);
+  initHealth(store, new Date());
   const stopScheduler = startScheduler({
     cycleMinutes: config.cycleMinutes,
-    isMarketOpen: () => adapter.isMarketOpen(),
-    runFn: () =>
-      runCycle({
-        config,
-        universe,
-        adapter,
-        broker,
-        store,
-        strategyDocs,
-        brain,
-        events,
-        secrets,
-        skeptic,
-      }),
+    isMarketOpen: async () => isTradingDay(new Date(), holidays) && await adapter.isMarketOpen(),
+    // 사이클 성공/실패를 heartbeat로 기록 — /health·대시보드·워치독이 읽는다
+    runFn: async () => {
+      recordCycleStart(store, new Date());
+      try {
+        const r = await runCycle({
+          config, universe, adapter, broker, store, strategyDocs, brain, events, secrets, skeptic,
+        });
+        recordCycleOk(store, new Date());
+        return r;
+      } catch (err) {
+        recordCycleError(store, new Date(), scrub(errMsg(err), secrets));
+        // 연속 실패가 임계에 막 도달한 순간 1회만 알림 (이후 반복 알림 방지)
+        const h = readHealth(store);
+        if (h && h.consecutiveFailures === FAILURE_THRESHOLD) {
+          void alert(`사이클 연속 ${h.consecutiveFailures}회 실패 — 점검 필요. 마지막 오류: ${h.lastError ?? ''}`);
+        }
+        throw err;
+      }
+    },
     onMarketClose: () => {
       broker.cancelAllPending();
       store.setKV('broker', JSON.stringify(broker.toJSON()));
+      // 장마감 1회/일 — 오래된 decisions·snapshots 정리 (무인 장기 운영 DB 증가 억제)
+      const pruned = store.prune(config.retentionDays ?? 90);
+      if (pruned > 0) console.log(`[prune] 오래된 로그 ${pruned}행 정리`);
     },
   });
 

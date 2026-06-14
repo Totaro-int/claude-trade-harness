@@ -88,4 +88,31 @@ describe('atomic & benchmark & thesis', () => {
     s.recordTrade({ ts: 't2', side: 'SELL', symbol: 'A', name: 'A', quantity: 1, price: 110, fee: 200, tax: 80 });
     expect(s.totalFees()).toBe(430);
   });
+
+  it('prune: 보존기간보다 오래된 decisions·snapshots 삭제, trades·kv 보존', () => {
+    const s = new Store(':memory:');
+    const old = '2026-01-01T00:00:00.000Z';
+    const recent = '2026-06-14T00:00:00.000Z';
+    for (const ts of [old, recent]) {
+      s.recordDecision({ ts, action: 'HOLD', symbol: null, name: null, quantity: null, orderType: null, limitPrice: null, reasoning: 'r', status: 'HOLD', rejectReason: null, marketView: 'm', thesis: null });
+      s.recordSnapshot({ ts, equity: 100, cash: 100, dailyPnlPct: 0, benchmark: null });
+    }
+    s.recordTrade({ ts: old, side: 'BUY', symbol: 'A', name: 'A', quantity: 1, price: 100, fee: 1, tax: 1 });
+    s.setKV('broker', 'x');
+
+    // 2026-06-15 기준 30일 보존 → old(1월) 삭제, recent(6/14) 보존
+    const removed = s.prune(30, new Date('2026-06-15T00:00:00.000Z'));
+    expect(removed).toBe(2); // decision 1 + snapshot 1
+    expect(s.getDecisions(10)).toHaveLength(1);
+    expect(s.getSnapshots(10)).toHaveLength(1);
+    expect(s.getTrades(10)).toHaveLength(1); // 거래 보존
+    expect(s.getKV('broker')).toBe('x');     // kv 보존
+  });
+
+  it('prune: retentionDays<=0이면 아무것도 삭제하지 않는다', () => {
+    const s = new Store(':memory:');
+    s.recordSnapshot({ ts: '2020-01-01T00:00:00.000Z', equity: 1, cash: 1, dailyPnlPct: 0, benchmark: null });
+    expect(s.prune(0)).toBe(0);
+    expect(s.getSnapshots(10)).toHaveLength(1);
+  });
 });

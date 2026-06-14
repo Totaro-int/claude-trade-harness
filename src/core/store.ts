@@ -122,6 +122,19 @@ export class Store {
     return this.#db.transaction(fn)();
   }
 
+  /**
+   * retentionDays보다 오래된 decisions·snapshots 행을 삭제한다 (몇 주 무인 운영 시 무한 증가 방지).
+   * trades·kv는 보존 — 거래는 감사·수수료 합계 무결성, kv는 운영 상태. 삭제된 총 행수 반환.
+   * ts는 ISO8601이라 사전식 비교가 시간 비교와 일치한다.
+   */
+  prune(retentionDays: number, now: Date = new Date()): number {
+    if (!(retentionDays > 0)) return 0;
+    const cutoff = new Date(now.getTime() - retentionDays * 86_400_000).toISOString();
+    const d = this.#db.prepare('DELETE FROM decisions WHERE ts < ?').run(cutoff);
+    const s = this.#db.prepare('DELETE FROM snapshots WHERE ts < ?').run(cutoff);
+    return d.changes + s.changes;
+  }
+
   /** 누적 수수료+세금 합계 */
   totalFees(): number {
     const row = this.#db.prepare('SELECT COALESCE(SUM(fee + tax), 0) AS total FROM trades').get() as { total: number };

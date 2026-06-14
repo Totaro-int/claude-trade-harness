@@ -5,6 +5,7 @@ import type { BrokerAdapter } from '../broker/adapter.js';
 import type { Store, TradeRow, DecisionRow } from './store.js';
 import type { BrainOutput, Decision, IndicatorRow, Position, Quote, Reflection, UniverseEntry } from './types.js';
 import { toOrder } from './orders.js';
+import { scrub, errMsg } from './scrub.js';
 import { checkOrder } from '../guardrails/index.js';
 import { buildPrompt } from '../brain/prompt.js';
 import { buildReflection, formatReflections, REFLECTION_LIMIT } from '../brain/reflection.js';
@@ -30,17 +31,6 @@ export interface CycleResult { skipped: boolean; reason?: string }
 
 const kstDate = (d: Date) => d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
 const nowISO = () => new Date().toISOString();
-const errMsg = (e: unknown) => e instanceof Error ? e.message : String(e);
-
-// 각 시크릿(6자 이상)을 '[REDACTED]'로 교체 (connection-test.ts의 scrub과 동일 동작).
-function scrub(text: string, secrets: string[]): string {
-  let out = text;
-  for (const s of secrets) {
-    if (s.length >= 6) out = out.replaceAll(s, '[REDACTED]');
-  }
-  return out;
-}
-
 // KST 09:00~09:30 — dayOpenEquity 초기화 허용 시간창 (슬립 복귀 오염 방지)
 function inDayOpenWindow(d: Date): boolean {
   const hm = d.toLocaleTimeString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 5);

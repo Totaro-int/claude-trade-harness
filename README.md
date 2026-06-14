@@ -143,6 +143,34 @@ npm start
 |------|--------|------|
 | `reflection` | `true` | 청산된 매매의 thesis 적중/실패를 회고로 누적해 다음 판단 프롬프트에 주입(과거 매매에서 학습) |
 | `skepticGate` | `false` | BUY 결정마다 2차 '회의론자' 반박 검토를 1회 더 거침(돌이킬 수 없는 매수만 재검증). **매수마다 claude 1회 추가 호출** — 비용 발생, 백테스트엔 미적용 |
+| `holidays` | (없음) | 기본 KRX 휴장일에 **추가**할 휴장일 `["YYYY-MM-DD", …]`(임시공휴일·선거일 등). 기본 휴장일 표는 `src/core/market-calendar.ts`에 있으며 매년 공식 캘린더로 검증·갱신 필요 |
+| `alertWebhook` | (없음) | 운영 알림을 보낼 webhook URL(Slack/Discord/generic, `{ text }` JSON POST). 미지정 시 콘솔·macOS 로컬 알림만 |
+| `retentionDays` | `90` | `decisions`·`snapshots` 로그 보존 일수 — 장마감마다 이보다 오래된 행 정리(거래·KV는 보존) |
+
+---
+
+## 무인 운영 (몇 주 자동 운영)
+
+장기 무인 페이퍼 운영을 위한 안전장치:
+
+- **거래일 캘린더** — 주말·KRX 휴장일에는 매매하지 않습니다(묵은 시세 매매 방지). 추가 휴장일은 `holidays`로 보강.
+- **`GET /health`** — liveness 엔드포인트. 건강하면 `200`, 연속 사이클 실패(3회 이상)나 사이클 멈춤 의심 시 `503`. 마지막 성공/실패 사이클·연속실패·가동시간을 JSON으로 반환합니다.
+- **원격 알림** — claude 인증 만료, 연속 사이클 실패, 치명적 오류(미처리 예외) 시 `alertWebhook`으로 알립니다.
+- **크래시 안전** — 미처리 예외/거부 시 브로커 상태를 저장하고 알림 후 종료 → 외부 supervisor가 재시작.
+
+외부 감시(crontab 예시 — 5분마다 `/health` 폴링해 실패 시 알림):
+
+```bash
+*/5 * * * * curl -fsS http://127.0.0.1:3000/health >/dev/null || \
+  curl -s -X POST "$ALERT_WEBHOOK" -H 'content-type: application/json' -d '{"text":"open-trader /health DOWN"}'
+```
+
+자동 재시작 supervisor(예: pm2):
+
+```bash
+pm2 start "npm start" --name open-trader --time
+pm2 save && pm2 startup   # 부팅 시 자동 기동
+```
 
 ---
 

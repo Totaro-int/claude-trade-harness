@@ -8,6 +8,7 @@ import type { PaperBroker } from '../broker/paper.js';
 import type { Store } from '../core/store.js';
 import type { SetupOrchestrator } from '../setup/orchestrator.js';
 import type { Quote } from '../core/types.js';
+import { readHealth, evaluateHealth } from '../core/health.js';
 
 export interface ServerDeps {
   config: AppConfig;
@@ -152,6 +153,7 @@ function buildState(deps: ServerDeps, brokerName: string) {
     brokerName,
     quotes: quotesObj,
     warning: store.getKV('warning'),
+    health: evaluateHealth(readHealth(store), new Date()),
   };
 }
 
@@ -345,6 +347,14 @@ export async function startServer(deps: ServerDeps): Promise<() => void> {
 
         if (pathname === '/api/state') {
           json(res, 200, buildState(deps, brokerName));
+          return;
+        }
+
+        // 무인 운영 liveness — 외부 워치독/모니터가 폴링. 건강하면 200, 아니면 503.
+        // 멈춤 한도는 사이클 '작업량' 기준 기본값(10분) — 사이클 간격과 무관(간격 기준은 오탐 유발).
+        if (pathname === '/health') {
+          const report = evaluateHealth(deps.store ? readHealth(deps.store) : null, new Date());
+          json(res, report.healthy ? 200 : 503, report);
           return;
         }
 

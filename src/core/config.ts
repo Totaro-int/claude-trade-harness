@@ -33,6 +33,12 @@ export interface AppConfig {
   claudeCmd: string;
   dbPath: string;
   port: number;
+  // 기본 KRX 휴장일에 더해 보강할 추가 휴장일(YYYY-MM-DD, KST). 임시공휴일·선거일 등. 선택.
+  holidays?: string[];
+  // 운영 알림 webhook(Slack/Discord/generic). 미지정 시 로컬 알림(콘솔·macOS)만. 선택.
+  alertWebhook?: string;
+  // decisions·snapshots 보존 일수. 장마감마다 이보다 오래된 행 정리. 미지정 시 90일. 선택.
+  retentionDays?: number;
 }
 
 const DEFAULTS: AppConfig = {
