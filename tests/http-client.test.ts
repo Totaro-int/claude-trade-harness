@@ -39,6 +39,14 @@ describe('createHttpClient', () => {
     expect(options.body).toBe(JSON.stringify({ symbol: 'AAPL', qty: 1 }));
   });
 
+  it('form-urlencoded content-type면 문자열 body를 그대로 전송(JSON.stringify 안 함)', async () => {
+    const fetcher = vi.fn(async () => new Response('{"access_token":"t"}', { status: 200 }));
+    const http = createHttpClient('https://api.broker.com', fetcher as never);
+    await http.post('/oauth2/token', 'grant_type=client_credentials&client_id=abc', { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+    const [, options] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+    expect(options.body).toBe('grant_type=client_credentials&client_id=abc');
+  });
+
   it('fetcher 호출 시 redirect:"error" 옵션이 포함됨', async () => {
     const fetcher = vi.fn(async () => new Response('{"ok":true}', { status: 200 }));
     const http = createHttpClient('https://api.broker.com', fetcher as never);

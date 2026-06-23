@@ -9,10 +9,14 @@ export function createHttpClient(baseUrl: string, fetcher: Fetcher = globalThis.
   async function request(method: 'GET' | 'POST', path: string, body?: unknown, init?: { headers?: Record<string, string> }): Promise<unknown> {
     if (/^[a-z]+:\/\//i.test(path)) throw new Error(`상대 경로만 허용됩니다: ${path}`);
     const url = base + (path.startsWith('/') ? path : '/' + path);
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(init?.headers ?? {}) };
+    // OAuth2 토큰 엔드포인트 등 form-urlencoded는 이미 인코딩된 문자열 body를 그대로 보낸다(JSON.stringify 금지).
+    const isForm = Object.entries(headers).some(([k, v]) => k.toLowerCase() === 'content-type' && /application\/x-www-form-urlencoded/i.test(v));
+    const payload = body === undefined ? undefined : (isForm && typeof body === 'string' ? body : JSON.stringify(body));
     const doFetch = () => fetcher(url, {
       method,
-      headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers,
+      body: payload,
       signal: AbortSignal.timeout(15_000),
       // 리다이렉트 금지 — 브로커 응답이 외부 호스트로 토큰을 유출하는 것 차단
       redirect: 'error',
