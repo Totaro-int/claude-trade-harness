@@ -1,6 +1,6 @@
 {
   "name": "claude-trade-harness",
-  "description": "claude-trade-harness 런처 플러그인 마켓플레이스 — LLM 트레이딩 하네스를 슬래시 커맨드로 제어",
+  "description": "claude-trade-harness 런처 플러그인 마켓플레이스 — AI 가치투자 분석 하네스를 슬래시 커맨드로 제어",
   "owner": {
     "name": "Totaro",
     "url": "https://github.com/Totaro-int"
@@ -9,9 +9,9 @@
     {
       "name": "trade-harness",
       "source": "./plugins/trade-harness",
-      "description": "claude-trade-harness 런처 — LLM 트레이딩 하네스의 온보딩·운영 데몬·대시보드·백테스트를 슬래시 커맨드로 제어하는 얇은 래퍼. 핵심 매매 엔진은 별도 클론한 하네스 앱(백그라운드 데몬)에서 동작.",
-      "version": "0.2.0",
-      "keywords": ["trading", "paper-trading", "llm", "harness", "launcher", "toss"]
+      "description": "claude-trade-harness 런처 — 증권사 어댑터 온보딩과 보유종목 4대가 가치투자 분석을 슬래시 커맨드로 실행하는 얇은 래퍼. 분석 엔진은 별도 클론한 하네스 앱에서 동작. 주문은 실행하지 않음.",
+      "version": "0.3.0",
+      "keywords": ["value-investing", "stock-analysis", "llm", "harness", "launcher", "toss"]
     }
   ]
 }

@@ -1,7 +1,6 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { saveEnvFile } from '../env.js';
-import { runClaudeText } from '../core/claude.js';
 import { generateAdapter, type GenerateResult } from './generator.js';
 import { loadAdapter } from '../broker/loader.js';
 import { runConnectionTest, type ConnResult } from './connection-test.js';
@@ -50,10 +49,9 @@ export interface BrokerReg {
 }
 
 export interface SetupStatus {
-  step: 'broker' | 'generate' | 'strategy' | 'finish';
+  step: 'broker' | 'generate' | 'finish';
   broker?: { brokerId: string; brokerName: string; baseUrl: string; docsUrls: string[] };
   adapterReady: boolean;
-  strategyReady: boolean;
 }
 
 export class SetupOrchestrator {
@@ -69,14 +67,12 @@ export class SetupOrchestrator {
   status(): SetupStatus {
     const adapterReady = this.#broker !== null
       && existsSync(join(this.#root, 'adapters', this.#broker.brokerId, 'adapter.ts'));
-    const stratDir = join(this.#root, 'strategy');
-    const strategyReady = existsSync(stratDir) && readdirSync(stratDir).some(f => f.endsWith('.md'));
     return {
-      step: !this.#broker ? 'broker' : !adapterReady ? 'generate' : !strategyReady ? 'strategy' : 'finish',
+      step: !this.#broker ? 'broker' : !adapterReady ? 'generate' : 'finish',
       broker: this.#broker
         ? { brokerId: this.#broker.brokerId, brokerName: this.#broker.brokerName, baseUrl: this.#broker.baseUrl, docsUrls: this.#broker.docsUrls }
         : undefined,
-      adapterReady, strategyReady,
+      adapterReady,
     };
   }
 
@@ -118,36 +114,6 @@ export class SetupOrchestrator {
     const adapter = await loadAdapter(join(this.#root, 'adapters', this.#broker.brokerId, 'adapter.ts'), this.#env());
     const secrets = [this.#broker.apiKey, this.#broker.apiSecret, this.#broker.accountNo].filter(s => s.length >= 6);
     return runConnectionTest(adapter, testSymbol, secrets);
-  }
-
-  async saveStrategyDoc(filename: string, content: string): Promise<void> {
-    if (!/^\w[\w.-]*\.(md|txt)$/.test(filename)) throw new Error('파일명은 영숫자 + .md/.txt만 허용됩니다');
-    mkdirSync(join(this.#root, 'strategy'), { recursive: true });
-    writeFileSync(join(this.#root, 'strategy', filename), content);
-  }
-
-  async generateStrategy(profile: { risk: string; capital: number; horizon: string; sectors: string[] }): Promise<void> {
-    const prompt = `투자 전략 문서와 종목 유니버스를 생성하십시오. JSON 코드블록 1개만 출력:
-{"strategyMd": "마크다운 전략 문서 (매매기법/진입·청산 규칙/리스크 관리 포함)", "universe": [{"symbol": "종목코드", "name": "종목명"}, ...최대 30개]}
-프로필: 성향 ${profile.risk}, 자금 ${profile.capital.toLocaleString()}원, 기간 ${profile.horizon}, 선호 ${profile.sectors.join(', ')}`;
-    const text = await runClaudeText(prompt, { claudeCmd: this.#claudeCmd, timeoutMs: 300_000 });
-    const m = text.match(/```(?:json)?\n([\s\S]*?)```/);
-    if (!m) throw new Error('전략 생성 응답 파싱 실패');
-    let parsed: { strategyMd: string; universe: Array<{ symbol: string; name: string }> };
-    try {
-      parsed = JSON.parse(m[1]!) as { strategyMd: string; universe: Array<{ symbol: string; name: string }> };
-    } catch (e) {
-      throw new Error(`전략 생성 응답이 유효한 JSON이 아닙니다: ${(e as Error).message}`);
-    }
-    if (typeof parsed.strategyMd !== 'string' || parsed.strategyMd.length === 0 || !Array.isArray(parsed.universe)) {
-      throw new Error('전략 응답 구조가 올바르지 않습니다');
-    }
-    const universe = parsed.universe
-      .filter(e => typeof e?.symbol === 'string' && typeof e?.name === 'string')
-      .slice(0, 30);
-    mkdirSync(join(this.#root, 'strategy'), { recursive: true });
-    writeFileSync(join(this.#root, 'strategy', 'strategy.md'), parsed.strategyMd);
-    writeFileSync(join(this.#root, 'strategy', 'universe.json'), JSON.stringify(universe, null, 2));
   }
 
   async finish(opts: { mode: 'paper' | 'live'; guardrails: Record<string, number>; agreed: boolean }): Promise<void> {

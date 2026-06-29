@@ -20,19 +20,6 @@ describe('SetupOrchestrator', () => {
     expect(JSON.stringify(orch.status())).not.toContain('SEC1');
   });
 
-  it('전략 업로드 → strategy/에 저장', async () => {
-    const { root, orch } = mkOrch();
-    await orch.saveStrategyDoc('my-strategy.md', '# 전략\n저평가 매수');
-    expect(readFileSync(join(root, 'strategy/my-strategy.md'), 'utf-8')).toContain('저평가');
-  });
-
-  it('인터뷰 → claude 스텁이 strategy.md + universe.json 생성', async () => {
-    const { root, orch } = mkOrch();
-    await orch.generateStrategy({ risk: '중립', capital: 10_000_000, horizon: '스윙(수주)', sectors: ['반도체'] });
-    expect(existsSync(join(root, 'strategy/strategy.md'))).toBe(true);
-    expect(existsSync(join(root, 'strategy/universe.json'))).toBe(true);
-  });
-
   it('finish → config.json 생성 (brokerId/가드레일 반영)', async () => {
     const { root, orch } = mkOrch();
     await orch.registerBroker({ brokerId: 'demo', brokerName: '데모증권', docsUrls: [], baseUrl: 'https://x.com', apiKey: 'k', apiSecret: 's', accountNo: '1' });
@@ -57,15 +44,6 @@ describe('SetupOrchestrator', () => {
     await expect(
       orch.registerBroker({ brokerId: badId, brokerName: '테스트', docsUrls: [], baseUrl: 'https://x.com', apiKey: 'k', apiSecret: 's', accountNo: '1' }),
     ).rejects.toThrow(/brokerId/);
-  });
-
-  // 파일명 유효성 — 비정상 파일명 거부
-  it.each([
-    ['../escape.md'],
-    ['a.md.sh'],
-  ])('saveStrategyDoc("%s") → 파일명 오류', async (badFilename) => {
-    const { orch } = mkOrch();
-    await expect(orch.saveStrategyDoc(badFilename, '내용')).rejects.toThrow();
   });
 
   // finish merge — 기존 config.json의 키가 보존되고 guardrails가 병합됨
@@ -123,12 +101,4 @@ describe('SetupOrchestrator', () => {
     await expect(orch.generate(() => {})).rejects.toThrow(/차단|허용/);
   });
 
-  // generateStrategy — 불량 JSON 응답 시 유효한 JSON 오류
-  it('generateStrategy: LLM이 불량 JSON 반환 시 유효한 JSON 오류', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'setup-'));
-    const orch = new SetupOrchestrator({ rootDir: root, claudeCmd: 'tests/fixtures/claude-stub-badjson.sh' });
-    await expect(
-      orch.generateStrategy({ risk: '중립', capital: 10_000_000, horizon: '스윙(수주)', sectors: ['반도체'] }),
-    ).rejects.toThrow(/유효한 JSON/);
-  });
 });

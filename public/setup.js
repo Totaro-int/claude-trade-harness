@@ -2,7 +2,7 @@ const $ = (id) => document.getElementById(id);
 const show = (id) => {
   for (const s of document.querySelectorAll('section.card')) s.hidden = true;
   $(id).hidden = false;
-  const order = ['step-broker', 'step-generate', 'step-test', 'step-strategy', 'step-finish'];
+  const order = ['step-broker', 'step-generate', 'step-test', 'step-finish'];
   document.querySelectorAll('#steps .dot').forEach((d, i) => d.classList.toggle('on', i <= order.indexOf(id)));
 };
 const appendLog = (el, msg) => {
@@ -47,56 +47,14 @@ $('btn-test').onclick = async () => {
   try {
     const r = await post('/api/setup/test', { testSymbol: $('testSymbol').value.trim() });
     for (const s of r.steps) appendLog($('test-log'), `${s.ok ? '✓' : '✗'} ${s.name}: ${s.detail}`);
-    if (r.ok) { appendLog($('test-log'), '연결 성공 — 전략 설정으로 이동합니다.'); setTimeout(() => show('step-strategy'), 800); }
+    if (r.ok) { appendLog($('test-log'), '연결 성공 — 마지막 단계로 이동합니다.'); setTimeout(() => show('step-finish'), 800); }
   } catch (err) { appendLog($('test-log'), '테스트 실패: ' + err.message); }
-};
-
-$('btn-strategy-upload').onclick = async () => {
-  await post('/api/setup/strategy/upload', { filename: 'strategy.md', content: $('strategyText').value });
-  show('step-finish');
-};
-
-$('btn-strategy-gen').onclick = async () => {
-  $('btn-strategy-gen').disabled = true;
-  $('strategy-log').hidden = false;
-  appendLog($('strategy-log'), 'Claude가 전략을 작성 중...');
-  try {
-    let stratDone = false;
-    const es = new EventSource('/api/setup/progress');
-    es.onmessage = (e) => {
-      const d = JSON.parse(e.data);
-      appendLog($('strategy-log'), d.message);
-      if (d.done) {
-        stratDone = true;
-        es.close();
-        if (d.ok) {
-          show('step-finish');
-        } else {
-          appendLog($('strategy-log'), '❌ 전략 생성 실패 — 설정을 확인하고 다시 시도하세요.');
-          $('btn-strategy-gen').disabled = false;
-        }
-      }
-    };
-    es.onerror = () => { if (!stratDone) appendLog($('strategy-log'), '⚠️ 진행 상황 연결 끊김 — 재연결 시도 중…'); };
-    await post('/api/setup/strategy/interview', {
-      risk: $('risk').value, capital: 10000000, horizon: $('horizon').value,
-      sectors: $('sectors').value.split(',').map(s => s.trim()).filter(Boolean),
-    });
-  } catch (err) {
-    appendLog($('strategy-log'), '실패: ' + err.message);
-    $('btn-strategy-gen').disabled = false;
-  }
 };
 
 $('btn-finish').onclick = async () => {
   try {
     await post('/api/setup/finish', {
-      mode: 'paper', agreed: $('agree').checked,
-      guardrails: {
-        maxPositionPct: Number($('g-maxPositionPct').value),
-        maxOrdersPerDay: Number($('g-maxOrdersPerDay').value),
-        dailyLossLimitPct: Number($('g-dailyLossLimitPct').value),
-      },
+      mode: 'paper', agreed: $('agree').checked, guardrails: {},
     });
     const host = location.host || 'localhost:3000';
     const wrap = document.createElement('div');
@@ -107,7 +65,7 @@ $('btn-finish').onclick = async () => {
     h2.textContent = '설정 완료';
     const p = document.createElement('p');
     p.className = 'sub';
-    p.textContent = `터미널에서 데몬이 재시작되면 http://${host}/ 으로 접속하세요. (이 창은 닫으셔도 됩니다)`;
+    p.textContent = `온보딩 완료. 터미널에서 \`npm run review\` 를 실행해 보유종목 분석을 시작하세요. (이 창은 닫으셔도 됩니다)`;
     card.append(h2, p);
     wrap.appendChild(card);
     document.body.textContent = '';
@@ -117,7 +75,6 @@ $('btn-finish').onclick = async () => {
 
 // 새로고침 시 진행 단계 복원
 fetch('/api/setup/status').then(r => r.json()).then(s => {
-  if (s.step === 'strategy') show('step-strategy');
-  else if (s.step === 'finish') show('step-finish');
-  else if (s.step === 'generate' || s.step === 'test') show('step-test');
+  if (s.step === 'finish') show('step-finish');
+  else if (s.step === 'generate') show('step-test');
 }).catch(() => { /* 서버 미응답 — 1단계(broker) 유지 */ });

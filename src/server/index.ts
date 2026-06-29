@@ -22,10 +22,6 @@ const BrokerRegSchema = z.object({
   baseUrl: z.string(), apiKey: z.string(), apiSecret: z.string(), accountNo: z.string(),
 });
 const TestSchema = z.object({ testSymbol: z.string().optional() });
-const StrategyUploadSchema = z.object({ filename: z.string(), content: z.string() });
-const InterviewSchema = z.object({
-  risk: z.string(), capital: z.number(), horizon: z.string(), sectors: z.array(z.string()),
-});
 const FinishSchema = z.object({
   mode: z.enum(['paper', 'live']),
   guardrails: z.record(z.string(), z.number()),
@@ -149,40 +145,6 @@ function createSetupHandler(deps: ServerDeps, progressClients: Set<ServerRespons
       } catch (err) {
         json(res, 200, { ok: false, steps: [], error: (err as Error).message });
       }
-      return true;
-    }
-
-    // POST /api/setup/strategy/upload
-    if (req.method === 'POST' && pathname === '/api/setup/strategy/upload') {
-      try {
-        const body = StrategyUploadSchema.parse(await readJson(req));
-        await orch.saveStrategyDoc(body.filename, body.content);
-        json(res, 200, { ok: true });
-      } catch (err) {
-        json(res, 400, { error: (err as Error).message });
-      }
-      return true;
-    }
-
-    // POST /api/setup/strategy/interview (async, 202)
-    if (req.method === 'POST' && pathname === '/api/setup/strategy/interview') {
-      let profile: z.infer<typeof InterviewSchema>;
-      try {
-        profile = InterviewSchema.parse(await readJson(req));
-      } catch (err) {
-        json(res, 400, { error: (err as Error).message });
-        return true;
-      }
-      res.writeHead(202, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: true }));
-      void (async () => {
-        try {
-          await orch.generateStrategy(profile);
-          pushProgress({ message: '전략 생성 완료', done: true, ok: true });
-        } catch (err) {
-          pushProgress({ message: (err as Error).message, done: true, ok: false, error: (err as Error).message });
-        }
-      })();
       return true;
     }
 

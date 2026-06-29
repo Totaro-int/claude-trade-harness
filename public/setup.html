@@ -12,7 +12,7 @@
       <span class="badge">SETUP</span>
     </div>
     <div class="steps" id="steps">
-      <div class="dot on"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div>
+      <div class="dot on"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div>
     </div>
 
     <section class="card" id="step-broker">
@@ -41,31 +41,14 @@
       <div class="log" id="test-log" style="margin-top:12px"></div>
     </section>
 
-    <section class="card" id="step-strategy" hidden>
-      <h2>④ 전략 설정</h2>
-      <p class="sub">전략 문서를 업로드하거나, 몇 가지 질문에 답하면 Claude가 초안을 만들어줍니다.</p>
-      <label>전략 문서 직접 입력 (Markdown) <textarea id="strategyText" rows="6" placeholder="# 내 전략..."></textarea></label>
-      <button class="primary" id="btn-strategy-upload" style="margin-top:10px">이 문서 사용</button>
-      <hr style="border-color:var(--line);margin:18px 0">
-      <p class="sub">또는 인터뷰로 생성:</p>
-      <label>성향 <select id="risk"><option>보수</option><option selected>중립</option><option>공격</option></select></label>
-      <label>투자 기간 <select id="horizon"><option>단기(수일)</option><option selected>스윙(수주)</option><option>중장기(수개월)</option></select></label>
-      <label>선호 섹터 (쉼표 구분) <input id="sectors" placeholder="반도체, 2차전지"></label>
-      <button class="primary" id="btn-strategy-gen" style="margin-top:14px">Claude에게 전략 생성 요청</button>
-      <div class="log" id="strategy-log" style="margin-top:12px" hidden></div>
-    </section>
-
     <section class="card" id="step-finish" hidden>
-      <h2>⑤ 운전 시작</h2>
-      <p class="sub">가드레일은 코드로 강제됩니다. 기본값을 권장합니다.</p>
-      <label>종목당 최대 비중 % <input id="g-maxPositionPct" type="number" value="20"></label>
-      <label>일일 최대 주문 수 <input id="g-maxOrdersPerDay" type="number" value="10"></label>
-      <label>일일 손실 한도 % (도달 시 매수 정지) <input id="g-dailyLossLimitPct" type="number" value="3"></label>
+      <h2>④ 온보딩 완료</h2>
+      <p class="sub">어댑터 연결이 끝났습니다. 이 도구는 보유종목을 <b style="color:var(--text)">읽어서 분석만</b> 하며 주문을 실행하지 않습니다.</p>
       <div class="card" style="background:var(--card-2);margin-top:16px">
-        <p class="sub">⚠ 모든 운전은 <b style="color:var(--text)">페이퍼 모드(가상 체결)</b>로 시작합니다. 이 소프트웨어는 투자 손실에 대해 어떤 책임도 지지 않으며, 모든 매매 결과는 사용자 본인 책임입니다.</p>
+        <p class="sub">⚠ 산출되는 분석은 <b style="color:var(--text)">투자 자문이 아니며</b>, 모든 투자 판단과 손실은 사용자 본인 책임입니다. 어떠한 수익도 보장하지 않습니다.</p>
         <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="agree" style="width:auto"> 위 내용을 이해했고 동의합니다</label>
       </div>
-      <button class="primary" id="btn-finish" style="margin-top:16px">페이퍼 트레이딩 시작</button>
+      <button class="primary" id="btn-finish" style="margin-top:16px">온보딩 완료</button>
     </section>
   </div>
   <script src="/setup.js"></script>
