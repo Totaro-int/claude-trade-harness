@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { AdapterEnv } from '../broker/adapter.js';
-import { runClaudeText } from '../brain/runner.js';
+import { runClaudeText } from '../core/claude.js';
 import { checkAdapterSource } from './static-check.js';
 
 export interface GenerateInput {

@@ -1,27 +1,24 @@
 {
   "name": "claude-trade-harness",
-  "version": "0.2.0",
-  "description": "Universal AI auto-trading harness — bring your broker's OpenAPI docs, Claude builds the adapter",
+  "version": "0.3.0",
+  "description": "AI 가치투자 분석 하네스 — 증권사 OpenAPI로 실보유를 받아 4대가 관점으로 평가",
   "private": true,
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "tsx src/main.ts",
-    "start": "tsx src/main.ts",
-    "backtest": "tsx src/backtest/main.ts",
-    "eval": "tsx src/backtest/eval-main.ts",
+    "dev": "tsx src/review/main.ts",
+    "start": "tsx src/review/main.ts",
+    "review": "tsx src/review/main.ts",
+    "onboard": "tsx src/main.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
-    "e2e": "playwright test"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
-    "uplot": "^1.6.32",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@playwright/test": "^1.60.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.9.3",
     "tsx": "^4.22.4",

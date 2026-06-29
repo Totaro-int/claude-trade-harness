@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { saveEnvFile } from '../env.js';
-import { runClaudeText } from '../brain/runner.js';
+import { runClaudeText } from '../core/claude.js';
 import { generateAdapter, type GenerateResult } from './generator.js';
 import { loadAdapter } from '../broker/loader.js';
 import { runConnectionTest, type ConnResult } from './connection-test.js';
