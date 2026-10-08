@@ -129,3 +129,9 @@ npm run review        # 온보딩 후 — 보유종목 분석 → reports/portfo
 ## 라이선스
 
 [MIT](./LICENSE)
+
+
+---
+
+## Built by TOTARO
+[TOTARO (주식회사 토타로 인터내셔널)](https://www.totaro.co.kr) — 지원사업·외주 개발을 기획부터 실 운영 안착까지 진행하는 0→1 개발 파트너. [포트폴리오](https://www.totaro.co.kr/work) · [외주 개발](https://www.totaro.co.kr/services/outsourcing)
